@@ -53,6 +53,8 @@ type fake struct {
 	uniClubs   directory.UniversityClubs
 	uniErr     error
 	claims     int
+	claimsErr  error          // PendingClaims' failure
+	reads      map[string]int // system reads of the queue counters, by port method
 	offerings  int
 	dsrs       int         // PendingRequests
 	dsrErr     error       // PendingRequests' refusal
@@ -101,6 +103,7 @@ func (f *fake) UserStats(_ context.Context, from, to time.Time) (identity.UserSt
 }
 
 func (f *fake) OrgStats(context.Context, time.Time, time.Time) (orgs.OrgStats, error) {
+	f.reads["OrgStats"]++
 	return f.orgStats, nil
 }
 
@@ -110,6 +113,7 @@ func (f *fake) MemberStats(_ context.Context, _ uuid.UUID, from, to time.Time) (
 }
 
 func (f *fake) ContentStats(context.Context, time.Time, time.Time) (feed.ContentStats, error) {
+	f.reads["ContentStats"]++
 	return f.content, nil
 }
 
@@ -184,16 +188,34 @@ func (f *fake) UniversityClubStats(context.Context, uuid.UUID) (directory.Univer
 	return f.uniClubs, f.uniErr
 }
 
-func (f *fake) PendingClaims(context.Context) (int, error) { return f.claims, nil }
+func (f *fake) PendingClaims(context.Context) (int, error) {
+	f.reads["PendingClaims"]++
+	return f.claims, f.claimsErr
+}
 
 func (f *fake) PendingUniversityDecisions(_ context.Context, ids []uuid.UUID) (int, error) {
 	f.offerAsk = ids
 	return f.offerings, nil
 }
 
-func (f *fake) PendingRequests(context.Context, authz.Actor) (int, error) { return f.dsrs, f.dsrErr }
+// adminSurface is the resource the modules' queue counters gate on.
+var adminSurface = authz.Resource{Type: authz.TypeAdminSurface}
 
-func (f *fake) PendingEduDocuments(context.Context, authz.Actor) (int, error) {
+// PendingRequests gates like kvkk does (kvkk.dsr.list on the admin
+// surface), then answers the fake's count or failure.
+func (f *fake) PendingRequests(ctx context.Context, a authz.Actor) (int, error) {
+	if err := authz.Can(ctx, a, authz.KvkkDsrList, adminSurface); err != nil {
+		return 0, err
+	}
+	return f.dsrs, f.dsrErr
+}
+
+// PendingEduDocuments gates like identity does
+// (identity.edu_verification.list on the admin surface).
+func (f *fake) PendingEduDocuments(ctx context.Context, a authz.Actor) (int, error) {
+	if err := authz.Can(ctx, a, authz.IdentityEduVerificationList, adminSurface); err != nil {
+		return 0, err
+	}
 	return f.docs, f.docsErr
 }
 
@@ -201,7 +223,7 @@ func (f *fake) PendingEduDocuments(context.Context, authz.Actor) (int, error) {
 func world(t *testing.T) (*fake, stats.Service) {
 	t.Helper()
 	f := &fake{orgs: map[uuid.UUID]orgs.OrgSummary{}, clubs: map[uuid.UUID]directory.Club{}, summaries: map[uuid.UUID]events.EventSummary{},
-		structure: map[uuid.UUID]directory.UniversityStructure{}}
+		structure: map[uuid.UUID]directory.UniversityStructure{}, reads: map[string]int{}}
 	for _, o := range authztest.Orgs() {
 		id := authztest.ID(o.Name)
 		f.orgs[id] = orgs.OrgSummary{ID: id, Kind: o.Kind, Name: o.Name, Status: orgs.StatusActive}

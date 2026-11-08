@@ -1,5 +1,7 @@
-# Authz matrix of the stats module (03 §5.23, 04 §2.23; BE-163). 4 read operations × 18 personas + variants.
+# Authz matrix of the stats module (03 §5.23, 04 §2.23; BE-163, BE-196). 5 read operations × 18 personas + variants.
 # getAdminStats is the admin surface: platform_admin 200, everyone else 403 (03 §7.2-3), anonymous 401.
+# getAdminQueues is the admin surface for every platform role (k37): 200 for each (a counter the role may not work
+# is null, not an error: wire_stats_test / stats unit tests), 403 without a platform role, anonymous 401.
 # The org panels are the org's management surface (03 §3.6): the panel's role on the org 200 (club_admin;
 # recruiter and company_admin; university_rep) and platform_admin 200; members of the org without the role and
 # the other platform roles 403; everyone else 404. A sensitive club's panel is visible to its members only (Y2:
@@ -37,6 +39,12 @@ operations:
         query: { from: "2026-06-30", to: "2026-01-01" }
         note: from after to is 422 after the authorisation
         expect: { anonymous: 401, platform_admin: 422, "@no_platform_role": 403, "@other_staff": 403 }
+
+  getAdminQueues:
+    method: GET
+    path: /api/v1/admin/queues
+    action: stats.queues.read
+    expect: { anonymous: 401, "@platform_staff": 200, "@no_platform_role": 403 }
 
   getClubStats:
     method: GET

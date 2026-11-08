@@ -21,7 +21,8 @@ func statsOrg(name string, kind authz.OrgKind, sensitive bool) authz.Resource {
 
 // TestStatsPolicy_Matrix pins 03 §5.23 (BE-163) for the 18 personas: the
 // platform panel to platform_admin only (403 for everyone else, the admin
-// surface); each org panel to its role on the org's surface plus
+// surface), the queue sizes to every platform role (k37, BE-196); each org
+// panel to its role on the org's surface plus
 // platform_admin (other platform roles 403), members without the role 403,
 // everyone else 404; a sensitive club's panel to its club_admin only
 // (staff 404, Y2).
@@ -47,6 +48,10 @@ func TestStatsPolicy_Matrix(t *testing.T) {
 	}{
 		{"platform", authz.StatsPlatformRead, authz.Resource{Type: authz.TypeAdminSurface}, forbidden,
 			map[string]error{"platform_admin": nil}},
+		// k37 (BE-196): the queue sizes to every platform role, 403 for everyone else.
+		{"queues", authz.StatsQueuesRead, authz.Resource{Type: authz.TypeAdminSurface}, forbidden,
+			map[string]error{"moderator": nil, "support": nil, "dpo": nil, "platform_admin": nil,
+				"finance_admin": nil, "talent_auditor": nil}},
 		{"club_a", authz.StatsClubRead, statsOrg("club_a", authz.OrgClub, false), notFound,
 			with(staff, map[string]error{"club_admin": nil, "club_member": forbidden})},
 		{"club_b", authz.StatsClubRead, statsOrg("club_b", authz.OrgClub, false), notFound,
@@ -78,6 +83,24 @@ func TestStatsPolicy_Matrix(t *testing.T) {
 	// The sensitive club's own club_admin (a helper user) reads its panel.
 	p, _ := authztest.Get("club_admin_sensitive")
 	wantErr(t, authz.Can(ctx, p.Actor, authz.StatsClubRead, statsOrg("club_sensitive", authz.OrgClub, true)), nil, false)
+}
+
+// TestStatsPolicy_QueuesNeedAPlatformRoleWithMFA (k37, k-mfa): the queue
+// sizes are a platform role's grant, so a platform role's session without
+// MFA is refused (403 authz.mfa_required); an org role (here a university
+// representative's, an MFA role too) never reaches them.
+func TestStatsPolicy_QueuesNeedAPlatformRoleWithMFA(t *testing.T) {
+	t.Parallel()
+	ctx, admin := t.Context(), authz.Resource{Type: authz.TypeAdminSurface}
+	for _, role := range []authz.PlatformRole{authz.PlatformModerator, authz.PlatformSupport, authz.PlatformDPO,
+		authz.PlatformAdmin, authz.PlatformFinanceAdmin, authz.PlatformTalentAuditor} {
+		a := authz.Actor{Kind: authz.KindUser, UserID: authztest.ID("staff_" + string(role)), PlatformRoles: []authz.PlatformRole{role}}
+		wantErr(t, authz.Can(ctx, a, authz.StatsQueuesRead, admin), authz.ErrMFARequired, false)
+		a.MFAVerified = true
+		wantErr(t, authz.Can(ctx, a, authz.StatsQueuesRead, admin), nil, false)
+	}
+	p, _ := authztest.Get("university_rep")
+	wantErr(t, authz.Can(ctx, p.Actor, authz.StatsQueuesRead, admin), authz.ErrForbidden, false)
 }
 
 // TestStatsPolicy_CareerStaffReadsUniversityPanel: career_staff holds the

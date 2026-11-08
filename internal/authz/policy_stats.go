@@ -8,6 +8,7 @@ package authz
 //	stats.club.read        S: club_admin of the club; platform_admin (not on a sensitive club)
 //	stats.company.read     S: company_member (recruiter), company_admin/owner; platform_admin
 //	stats.university.read  S: university_rep, career_staff; platform_admin
+//	stats.queues.read      every platform role (admin surface; BE-196)
 //
 // Resources (03 §3.5): the org panels pass the TypeOrg resource of the
 // path's org (org_kind, org_status) and, for the club panel, Attrs
@@ -16,14 +17,17 @@ package authz
 // unless platform_admin); everyone else gets 404 (03 §3.6). A sensitive
 // club's panel is visible to its members only (Y2: its member figures are
 // membership data; platform staff get 404, like the member list, k4). The
-// platform panel is the admin surface (03 §7.2-3): 403 without the role.
+// platform panel and the queue sizes are the admin surface (03 §7.2-3):
+// 403 without the role. The queue sizes are open to every platform role:
+// each counter is gated again by its queue's own list action (k37), so the
+// action only says "may ask which of the queues it works are how long".
 // MFA follows from the role paths (k-mfa: uni, cma, pad; not cla, cmm,
 // career_staff).
 func statsPolicy() Policy {
 	return Policy{
 		Visible: func(a Actor, act Action, r Resource) bool {
 			switch act {
-			case StatsPlatformRead:
+			case StatsPlatformRead, StatsQueuesRead:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
 			case StatsClubRead:
 				if r.Type != TypeOrg {
@@ -40,8 +44,13 @@ func statsPolicy() Policy {
 		},
 		Grants: func(a Actor, act Action, r Resource) []Grant {
 			pad := Grant{Role: RolePlatformAdmin}
-			if act == StatsPlatformRead {
+			switch act {
+			case StatsPlatformRead:
 				return []Grant{pad}
+			case StatsQueuesRead: // k37: every platform role; the counters are gated again
+				return []Grant{{Role: RoleModerator}, {Role: RoleSupport}, {Role: RoleDPO}, pad,
+					{Role: RoleFinanceAdmin}, {Role: RoleTalentAuditor}}
+			default:
 			}
 			var gs []Grant
 			if act != StatsClubRead || !r.Flag(AttrSensitive) { // Y2: no staff on a sensitive club

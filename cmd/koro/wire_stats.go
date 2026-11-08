@@ -20,7 +20,8 @@ import (
 // events (Statistics and Events: a sponsored event's summary, BE-189),
 // orders (sales and purchases), outreach, messaging, entitlements,
 // students and catalog, and the queue counters of kvkk and identity
-// (BE-192: gated by the queue's own list action).
+// (BE-192: gated by the queue's own list action; getAdminQueues, BE-196,
+// reads the same ports).
 // A module that does not offer its read stops the build.
 type statsWiring struct {
 	svc stats.Service // set by build
@@ -65,6 +66,7 @@ func (w *statsWiring) build(c *container) error {
 // tasks: none (stats owns no table, event or job).
 func (w *statsWiring) tasks(c *container) {}
 
-// routes: getAdminStats, getClubStats, getCompanyStats, getUniversityStats
-// (04 §2.23); w.svc is nil under `koro openapi`, which Register tolerates.
+// routes: getAdminStats, getAdminQueues (BE-196), getClubStats,
+// getCompanyStats, getUniversityStats (04 §2.23); w.svc is nil under
+// `koro openapi`, which Register tolerates.
 func (w *statsWiring) routes(c *container, api huma.API) { stats.Register(api, w.svc) }

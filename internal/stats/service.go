@@ -13,7 +13,6 @@ import (
 	"koro/internal/directory"
 	"koro/internal/entitlements"
 	"koro/internal/events"
-	"koro/internal/feed"
 	"koro/internal/messaging"
 	"koro/internal/orgs"
 	"koro/internal/outreach"
@@ -70,37 +69,16 @@ func (s *service) Platform(ctx context.Context, a authz.Actor, q RangeQuery) (Pl
 			ReportsByStatus: keyCounts(content.ReportsByStatus), ReportsInRange: content.ReportsInRange},
 		Events: PlatformEventsDTO{Upcoming: ev.Upcoming, HeldInRange: ev.Held, CancelledInRange: ev.Cancelled,
 			Registered: ev.Registered, CheckedIn: ev.CheckedIn, AttendanceRate: rate(ev.CheckedIn, ev.Registered)},
-		Queues: PlatformQueuesDTO{ClubClaims: claims,
-			ContentReports: content.ReportsByStatus[feed.ReportOpen] + content.ReportsByStatus[feed.ReportInReview]},
+		Queues: PlatformQueuesDTO{OrgReviews: pendingOrgReviews(org), ClubClaims: claims,
+			ContentReports: openContentReports(content)},
 	}
-	if out.Queues.KvkkRequests, err = queueSize(s.d.DataRequests.PendingRequests(ctx, a)); err != nil {
-		return PlatformStats{}, err
-	}
-	if out.Queues.StudentDocuments, err = queueSize(s.d.StudentDocs.PendingEduDocuments(ctx, a)); err != nil {
+	if out.Queues.KvkkRequests, out.Queues.StudentDocuments, err = s.moduleQueues(ctx, a); err != nil {
 		return PlatformStats{}, err
 	}
 	for _, n := range users.ByStatus {
 		out.Users.Total += n
 	}
-	for _, c := range org.Counts {
-		if c.Status == orgs.StatusPendingReview {
-			out.Queues.OrgReviews += c.Count
-		}
-	}
 	return out, nil
-}
-
-// queueSize maps a queue counter gated by the queue's own action: the
-// count for a caller who may work the queue, nil for one the module refuses
-// (403/404 of the authorisation), any other error as is.
-func queueSize(n int, err error) (*int, error) {
-	switch {
-	case err == nil:
-		return &n, nil
-	case errors.Is(err, authz.ErrForbidden), errors.Is(err, authz.ErrNotFound):
-		return nil, nil
-	}
-	return nil, err
 }
 
 // platformOrgs groups the org counts by kind.

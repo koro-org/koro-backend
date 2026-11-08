@@ -11,7 +11,7 @@ import (
 	"koro/internal/platform/httpx/op"
 )
 
-// Register adds the stats operations (04 §2.23, BE-163) to api. svc may be
+// Register adds the stats operations (04 §2.23, BE-163, BE-196) to api. svc may be
 // nil (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
@@ -25,6 +25,17 @@ func Register(api huma.API, svc Service) {
 			"work that queue (kvkk.dsr.list; identity.edu_verification.list) and are null otherwise. " +
 			"The *_in_range figures cover the range (default: the last 30 days)." + rangeNote,
 	}, op.Meta{Action: string(authz.StatsPlatformRead), Surface: op.SurfaceAdmin, QuerySyntax: rangeSyntax}, h.platform)
+
+	op.Register(api, "stats", huma.Operation{
+		OperationID: "getAdminQueues", Method: http.MethodGet, Path: "/admin/queues",
+		Summary: "Get the review queue sizes the caller works",
+		Description: "The number of items waiting now in each review queue of the admin surface, for every platform " +
+			"role (BE-196). A queue is counted only for a caller who may work it, by its own list action, and is " +
+			"null otherwise: org reviews (orgs.org.list_admin), club claims (directory.club_claim.list), content " +
+			"reports (feed.report.list), KVKK requests (kvkk.dsr.list: every open request for the dpo, those " +
+			"awaiting the second approval for platform_admin) and student documents " +
+			"(identity.edu_verification.list). Counts only; the same figures as the queues of getAdminStats.",
+	}, op.Meta{Action: string(authz.StatsQueuesRead), Surface: op.SurfaceAdmin}, h.queues)
 
 	op.Register(api, "stats", huma.Operation{
 		OperationID: "getClubStats", Method: http.MethodGet, Path: "/orgs/{org_id}/stats/club",
@@ -100,6 +111,22 @@ func (h handler) platform(ctx context.Context, in *platformInput) (*platformOutp
 		return nil, err
 	}
 	return &platformOutput{Body: st}, nil
+}
+
+type queuesOutput struct {
+	Body QueueStats
+}
+
+func (h handler) queues(ctx context.Context, _ *struct{}) (*queuesOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	st, err := h.svc.Queues(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	return &queuesOutput{Body: st}, nil
 }
 
 // The org panels' inputs: the org, the period and the panel's filters

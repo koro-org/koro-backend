@@ -95,6 +95,20 @@ type PlatformQueuesDTO struct {
 	StudentDocuments *int `json:"student_documents" doc:"Student documents awaiting review; null without identity.edu_verification.list (support, platform_admin)"`
 }
 
+// ---- queues (getAdminQueues)
+
+// QueueStats is the size of the platform's review queues for the caller
+// (getAdminQueues; BE-196): every platform role asks, and each counter is
+// a number only for a role that may work that queue (the queue's own list
+// action, the rule of BE-192), null otherwise. Counts only, now.
+type QueueStats struct {
+	OrgReviews       *int `json:"org_reviews" doc:"Orgs awaiting verification (pending_review); null without orgs.org.list_admin (moderator, support, platform_admin)"`
+	ClubClaims       *int `json:"club_claims" doc:"Pending club claims, every university; null without directory.club_claim.list (support, platform_admin)"`
+	ContentReports   *int `json:"content_reports" doc:"Content reports open or in review; null without feed.report.list (moderator, platform_admin)"`
+	KvkkRequests     *int `json:"kvkk_requests" doc:"Data subject (KVKK) requests awaiting action that the caller may work: every open request for the dpo, those awaiting the second approval for platform_admin; null without kvkk.dsr.list"`
+	StudentDocuments *int `json:"student_documents" doc:"Student documents awaiting review; null without identity.edu_verification.list (support, platform_admin)"`
+}
+
 // ---- club (getClubStats)
 
 // ClubStats is a club's panel (SR §8 Kulüp).

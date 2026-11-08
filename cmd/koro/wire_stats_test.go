@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
+	"koro/internal/authz"
 	"koro/internal/authz/authztest"
 	"koro/internal/platform/httpx"
 	"koro/internal/platform/obs"
@@ -17,7 +20,7 @@ func (w *statsWiring) useMemStore() {}
 // TestWire_StatsReadsEveryModuleAndRoutes (BE-163): stats builds over the
 // Statistics reads of the modules that own the rows (each asserted on its
 // service), answers the platform panel over the in-memory stores and
-// registers its four read operations on the admin and org surfaces.
+// registers its five read operations on the admin and org surfaces.
 func TestWire_StatsReadsEveryModuleAndRoutes(t *testing.T) {
 	t.Parallel()
 	c := newTestContainer(t)
@@ -44,6 +47,7 @@ func TestWire_StatsReadsEveryModuleAndRoutes(t *testing.T) {
 	paths := app.API.OpenAPI().Paths
 	for _, tc := range []struct{ path, id, surface string }{
 		{"/api/v1/admin/stats", "getAdminStats", "admin"},
+		{"/api/v1/admin/queues", "getAdminQueues", "admin"},
 		{"/api/v1/orgs/{org_id}/stats/club", "getClubStats", "org"},
 		{"/api/v1/orgs/{org_id}/stats/company", "getCompanyStats", "org"},
 		{"/api/v1/orgs/{org_id}/stats/university", "getUniversityStats", "org"},
@@ -72,5 +76,50 @@ func TestWire_StatsNeedsEveryRead(t *testing.T) {
 	c.orders.svc = nil
 	if err := c.stats.build(c); err == nil {
 		t.Fatal("stats built without the orders read")
+	}
+}
+
+// TestWire_StatsQueuesGatedByTheModules (BE-196, 03 k37): over the real
+// modules (in-memory stores), every platform role reads the queue sizes
+// and each counter is a number only for the roles the queue's own list
+// action admits: the kvkk and identity counters are those modules' own
+// gated counts (BE-192), the other three stats' gate on the modules'
+// list actions.
+func TestWire_StatsQueuesGatedByTheModules(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		persona string
+		want    string // the non-null counters: o(rg reviews) c(lub claims) r(eports) k(vkk) d(ocuments)
+	}{
+		{"moderator", "or"}, {"support", "ocd"}, {"dpo", "k"}, {"platform_admin", "ocrkd"},
+		{"finance_admin", ""}, {"talent_auditor", ""},
+	} {
+		p, _ := authztest.Get(tc.persona)
+		q, err := c.stats.svc.Queues(t.Context(), p.Actor)
+		if err != nil {
+			t.Fatalf("%s: Queues: %v", tc.persona, err)
+		}
+		var got strings.Builder
+		for _, x := range []struct {
+			key string
+			n   *int
+		}{{"o", q.OrgReviews}, {"c", q.ClubClaims}, {"r", q.ContentReports}, {"k", q.KvkkRequests}, {"d", q.StudentDocuments}} {
+			if x.n != nil {
+				got.WriteString(x.key)
+			}
+		}
+		if got.String() != tc.want {
+			t.Errorf("%s: non-null counters %q, want %q", tc.persona, got.String(), tc.want)
+		}
+	}
+	for _, name := range []string{"student", "club_admin", "university_rep", "company_admin"} {
+		p, _ := authztest.Get(name)
+		if _, err := c.stats.svc.Queues(t.Context(), p.Actor); !errors.Is(err, authz.ErrForbidden) {
+			t.Errorf("%s: Queues err = %v, want 403", name, err)
+		}
 	}
 }

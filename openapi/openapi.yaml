@@ -12718,6 +12718,46 @@ components:
             - erased
           type: string
       type: object
+    QueueStats:
+      additionalProperties: false
+      properties:
+        club_claims:
+          description: Pending club claims, every university; null without directory.club_claim.list (support, platform_admin)
+          format: int64
+          type:
+            - integer
+            - "null"
+        content_reports:
+          description: Content reports open or in review; null without feed.report.list (moderator, platform_admin)
+          format: int64
+          type:
+            - integer
+            - "null"
+        kvkk_requests:
+          description: "Data subject (KVKK) requests awaiting action that the caller may work: every open request for the dpo, those awaiting the second approval for platform_admin; null without kvkk.dsr.list"
+          format: int64
+          type:
+            - integer
+            - "null"
+        org_reviews:
+          description: Orgs awaiting verification (pending_review); null without orgs.org.list_admin (moderator, support, platform_admin)
+          format: int64
+          type:
+            - integer
+            - "null"
+        student_documents:
+          description: Student documents awaiting review; null without identity.edu_verification.list (support, platform_admin)
+          format: int64
+          type:
+            - integer
+            - "null"
+      required:
+        - org_reviews
+        - club_claims
+        - content_reports
+        - kvkk_requests
+        - student_documents
+      type: object
     QuoteOrderOutputBody:
       additionalProperties: false
       properties:
@@ -23964,6 +24004,34 @@ paths:
       x-koro-rate-limit: write_default
       x-koro-surface: admin
       x-koro-terms-gate: enforced
+  /api/v1/admin/queues:
+    get:
+      description: "The number of items waiting now in each review queue of the admin surface, for every platform role (BE-196). A queue is counted only for a caller who may work it, by its own list action, and is null otherwise: org reviews (orgs.org.list_admin), club claims (directory.club_claim.list), content reports (feed.report.list), KVKK requests (kvkk.dsr.list: every open request for the dpo, those awaiting the second approval for platform_admin) and student documents (identity.edu_verification.list). Counts only; the same figures as the queues of getAdminStats."
+      operationId: getAdminQueues
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueStats"
+          description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Get the review queue sizes the caller works
+      tags:
+        - stats
+      x-koro-action: stats.queues.read
+      x-koro-rate-limit: read_default
+      x-koro-surface: admin
   /api/v1/admin/receivable-collections:
     get:
       operationId: adminListReceivableCollections

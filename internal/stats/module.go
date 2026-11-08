@@ -21,7 +21,11 @@
 //     counters are gated again by the queue's own list action (BE-192):
 //     a number is shown only to a role that may work the queue, null
 //     otherwise; the KVKK one counts what kvkk.dsr.list would show the
-//     caller (03 k32: platform_admin only the second approvals).
+//     caller (03 k32: platform_admin only the second approvals). The
+//     queue sizes (getAdminQueues, BE-196; queues.go) are every platform
+//     role's (03 k37, admin surface: 403 for everyone else) under the same
+//     rule for each of the five queues: org reviews, club claims, content
+//     reports, KVKK requests and student documents.
 //   - Read only, scoped by the path: the org comes from the path and is
 //     read from orgs (H-38), never from a body; every provider read is
 //     keyed by it (or by the university the directory row of that org
@@ -66,11 +70,13 @@ import (
 	"koro/internal/platform/clock"
 )
 
-// Service is the stats service: the four panel reads. Every method calls
-// authz.Can first (05 §5.3).
+// Service is the stats service: the four panel reads and the queue sizes.
+// Every method calls authz.Can first (05 §5.3).
 type Service interface {
 	// Platform is getAdminStats (stats.platform.read).
 	Platform(ctx context.Context, a authz.Actor, q RangeQuery) (PlatformStats, error)
+	// Queues is getAdminQueues (stats.queues.read; BE-196).
+	Queues(ctx context.Context, a authz.Actor) (QueueStats, error)
 	// Club is getClubStats (stats.club.read).
 	Club(ctx context.Context, a authz.Actor, orgID uuid.UUID, q RangeQuery) (ClubStats, error)
 	// Company is getCompanyStats (stats.company.read).

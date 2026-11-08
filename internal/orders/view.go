@@ -30,6 +30,7 @@ type ListQuery struct {
 	OrderNo     string
 	PlacedFrom  *time.Time
 	PlacedUntil *time.Time
+	EventID     *uuid.UUID // org list: orders with a line of the event (BE-199)
 	Limit       int
 	After       *TimeKey
 }
@@ -37,6 +38,7 @@ type ListQuery struct {
 // SalesQuery narrows listOrgSales.
 type SalesQuery struct {
 	Fulfillment Fulfillment
+	EventID     *uuid.UUID // only the lines of the event (BE-199)
 	Limit       int
 	After       *TimeKey
 }

@@ -266,7 +266,7 @@ func (s *service) ListOrgOrders(ctx context.Context, a authz.Actor, orgID uuid.U
 		return OrderPage{}, problem.Field("query.status", "is not an order status")
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListOrgOrders(ctx, o.ID, OrderFilter{Status: q.Status}, q.After, limit+1)
+	rows, err := s.d.Store.ListOrgOrders(ctx, o.ID, OrderFilter{Status: q.Status, EventID: q.EventID}, q.After, limit+1)
 	if err != nil {
 		return OrderPage{}, err
 	}
@@ -328,7 +328,7 @@ func (s *service) ListOrgSales(ctx context.Context, a authz.Actor, orgID uuid.UU
 		return SalesPage{}, problem.Field("query.fulfillment_status", "is not a fulfilment status")
 	}
 	limit := page.ClampLimit(q.Limit)
-	rows, err := s.d.Store.ListSales(ctx, o.ID, SalesFilter{Fulfillment: q.Fulfillment}, q.After, limit+1)
+	rows, err := s.d.Store.ListSales(ctx, o.ID, SalesFilter{Fulfillment: q.Fulfillment, EventID: q.EventID}, q.After, limit+1)
 	if err != nil {
 		return SalesPage{}, err
 	}

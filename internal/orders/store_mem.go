@@ -348,7 +348,20 @@ func (m *MemStore) orderPage(keep func(Order) bool, after *TimeKey, limit int) [
 func (m *MemStore) ListOrgOrders(_ context.Context, orgID uuid.UUID, f OrderFilter, after *TimeKey, limit int) ([]Order, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.orderPage(func(o Order) bool { return o.OrgID == orgID && (f.Status == "" || o.Status == f.Status) }, after, limit), nil
+	return m.orderPage(func(o Order) bool {
+		return o.OrgID == orgID && (f.Status == "" || o.Status == f.Status) && (f.EventID == nil || m.hasEventLine(o, *f.EventID))
+	}, after, limit), nil
+}
+
+// hasEventLine reports whether the order holds a line of the event that
+// did not drop out (OrderFilter.EventID).
+func (m *MemStore) hasEventLine(o Order, eventID uuid.UUID) bool {
+	for _, l := range m.lines {
+		if l.OrderID == o.ID && l.OrgID == o.OrgID && l.EventID != nil && *l.EventID == eventID && !l.Dropped() {
+			return true
+		}
+	}
+	return false
 }
 
 // ListOrders implements Store.
@@ -368,7 +381,8 @@ func (m *MemStore) ListSales(_ context.Context, sellerOrgID uuid.UUID, f SalesFi
 	defer m.mu.Unlock()
 	var out []Line
 	for _, l := range m.lines {
-		if l.SellerOrgID == sellerOrgID && (f.Fulfillment == "" || l.FulfillmentStatus == f.Fulfillment) && before(l.CreatedAt, l.ID, after) {
+		if l.SellerOrgID == sellerOrgID && (f.Fulfillment == "" || l.FulfillmentStatus == f.Fulfillment) &&
+			(f.EventID == nil || (l.EventID != nil && *l.EventID == *f.EventID)) && before(l.CreatedAt, l.ID, after) {
 			out = append(out, cloneLine(l))
 		}
 	}

@@ -37590,7 +37590,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/orders:
     get:
-      description: Newest placement first.
+      description: Newest placement first. event_id keeps the orders with a line of that event (one that did not drop out of its unpaid order), the orders of the event row of getCompanyStats sponsorship (BE-199); an event the company bought nothing of gives an empty list.
       operationId: listOrgOrders
       parameters:
         - description: Organization ID (an unknown or malformed ID is 404)
@@ -37643,6 +37643,14 @@ paths:
             description: -placed_at (the only order)
             enum:
               - -placed_at
+            type: string
+        - description: Only the orders with a line of this event (BE-199)
+          explode: false
+          in: query
+          name: event_id
+          schema:
+            description: Only the orders with a line of this event (BE-199)
+            format: uuid
             type: string
       responses:
         "200":
@@ -38643,7 +38651,7 @@ paths:
       x-koro-surface: org
   /api/v1/orgs/{org_id}/sales:
     get:
-      description: "The seller's lines, newest first, with the order's reference, the buyer's title and seller_status: the order's status from this organization's own lines of it alone (Q-31, BE-141), so another seller's dispute, refund or delivery never shows (order_status, deprecated, carries the same value). A line with dropped_at left its unpaid order when the offering was cancelled."
+      description: "The seller's lines, newest first, with the order's reference, the buyer's title and seller_status: the order's status from this organization's own lines of it alone (Q-31, BE-141), so another seller's dispute, refund or delivery never shows (order_status, deprecated, carries the same value). A line with dropped_at left its unpaid order when the offering was cancelled. event_id keeps the lines of that event (BE-199); an event this organization sold nothing of gives an empty list."
       operationId: listOrgSales
       parameters:
         - description: Organization ID (an unknown or malformed ID is 404)
@@ -38684,6 +38692,14 @@ paths:
               - fulfilled
               - disputed
               - cancelled
+            type: string
+        - description: Only the lines of this event (BE-199)
+          explode: false
+          in: query
+          name: event_id
+          schema:
+            description: Only the lines of this event (BE-199)
+            format: uuid
             type: string
       responses:
         "200":

@@ -126,11 +126,15 @@ type OrderFilter struct {
 	OrderNo     string     // admin list: one canonical reference code
 	PlacedFrom  *time.Time // admin list: placed_at >= PlacedFrom
 	PlacedUntil *time.Time // admin list: placed_at < PlacedUntil
+	// EventID keeps the orders with a line of the event that did not drop
+	// out of its unpaid order (BE-134), the lines of PurchaseStats (BE-199).
+	EventID *uuid.UUID
 }
 
 // SalesFilter narrows ListSales.
 type SalesFilter struct {
 	Fulfillment Fulfillment // "" = any
+	EventID     *uuid.UUID  // nil = any: only the lines of the event (BE-199)
 }
 
 // RefundDue is money that waits for a refund (BE-043 opens refunds from

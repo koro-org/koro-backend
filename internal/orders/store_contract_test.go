@@ -265,6 +265,80 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orders.Store, worl
 		}
 	})
 
+	// lists by event (BE-199): the buyer's orders with a line of the event
+	// that did not drop out, once each, newest first; another buyer's
+	// orders, orders of another event and an order whose only line of the
+	// event dropped are left out. The seller's sales: only its lines of the
+	// event.
+	t.Run("lists by event", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		b, other, sl, s2 := w.buyer(t), w.buyer(t), w.seller(t), w.seller(t)
+		ev, ev2 := w.event(t, sl.org), w.event(t, s2.org)
+		insert := func(f fixture, evs ...*uuid.UUID) fixture {
+			t.Helper()
+			for i, e := range evs {
+				f.lines[i].EventID = e
+			}
+			if err := s.InsertOrder(ctx, f.o, f.lines); err != nil {
+				t.Fatalf("InsertOrder: %v", err)
+			}
+			return f
+		}
+		// a: two lines of ev (listed once); c: a line of ev and one of ev2.
+		a := insert(newFixture(b, t0, []offeringRef{w.offering(t, sl), w.offering(t, sl)}, []sellerRef{sl, sl}), &ev, &ev)
+		c := insert(newFixture(b, t0.Add(time.Minute), []offeringRef{w.offering(t, s2), w.offering(t, sl)}, []sellerRef{s2, sl}), &ev2, &ev)
+		// left out: ev2 only, no event, another buyer's ev order, ev line dropped.
+		insert(newFixture(b, t0.Add(2*time.Minute), []offeringRef{w.offering(t, s2)}, []sellerRef{s2}), &ev2)
+		insert(newFixture(b, t0.Add(3*time.Minute), []offeringRef{w.offering(t, sl)}, []sellerRef{sl}))
+		insert(newFixture(other, t0.Add(4*time.Minute), []offeringRef{w.offering(t, sl)}, []sellerRef{sl}), &ev)
+		g := insert(newFixture(b, t0.Add(5*time.Minute), []offeringRef{w.offering(t, sl), w.offering(t, sl)}, []sellerRef{sl, sl}), &ev)
+		keep, drop := g.lines[1], g.lines[0]
+		next := g.o
+		next.SubtotalAmount, next.VATAmount, next.TotalAmount = keep.NetAmount, keep.VATAmount, keep.GrossAmount
+		next.PayableAmount, next.KoroCollectAmount = keep.PayableAmount, keep.PayableAmount
+		if _, _, err := s.DropLines(ctx, next, []uuid.UUID{drop.ID}, t0.Add(6*time.Minute)); err != nil {
+			t.Fatalf("DropLines: %v", err)
+		}
+
+		page, err := s.ListOrgOrders(ctx, b.org, orders.OrderFilter{EventID: &ev}, nil, 10)
+		if err != nil || !slices.Equal(ids(page), []uuid.UUID{c.o.ID, a.o.ID}) {
+			t.Fatalf("by event = %v, %v; want %v", ids(page), err, []uuid.UUID{c.o.ID, a.o.ID})
+		}
+		page, err = s.ListOrgOrders(ctx, b.org, orders.OrderFilter{EventID: &ev}, nil, 1)
+		if err != nil || len(page) != 1 || page[0].ID != c.o.ID {
+			t.Fatalf("by event page 1 = %v, %v", ids(page), err)
+		}
+		page, err = s.ListOrgOrders(ctx, b.org, orders.OrderFilter{EventID: &ev}, &orders.TimeKey{At: page[0].PlacedAt, ID: page[0].ID}, 1)
+		if err != nil || len(page) != 1 || page[0].ID != a.o.ID {
+			t.Fatalf("by event page 2 = %v, %v", ids(page), err)
+		}
+		if page, _ := s.ListOrgOrders(ctx, b.org, orders.OrderFilter{EventID: &ev, Status: orders.StatusPaid}, nil, 10); len(page) != 0 {
+			t.Fatalf("by event, paid = %v", ids(page))
+		}
+		unknown := uuid.NewV7()
+		if page, err := s.ListOrgOrders(ctx, b.org, orders.OrderFilter{EventID: &unknown}, nil, 10); err != nil || len(page) != 0 {
+			t.Fatalf("unknown event = %v, %v", ids(page), err)
+		}
+
+		sales, err := s.ListSales(ctx, sl.org, orders.SalesFilter{EventID: &ev}, nil, 10)
+		// sl's lines of ev: a's two, c's second, other's one, g's dropped one.
+		if err != nil || len(sales) != 5 {
+			t.Fatalf("sales of ev = %d, %v", len(sales), err)
+		}
+		for _, l := range sales {
+			if l.SellerOrgID != sl.org || l.EventID == nil || *l.EventID != ev {
+				t.Fatalf("sales of ev holds %+v", l)
+			}
+		}
+		if sales, err := s.ListSales(ctx, sl.org, orders.SalesFilter{EventID: &ev2}, nil, 10); err != nil || len(sales) != 0 {
+			t.Fatalf("sl's sales of ev2 = %d, %v", len(sales), err)
+		}
+		if sales, err := s.ListSales(ctx, s2.org, orders.SalesFilter{EventID: &ev2}, nil, 10); err != nil || len(sales) != 2 {
+			t.Fatalf("s2's sales of ev2 = %d, %v", len(sales), err)
+		}
+	})
+
 	t.Run("jobs: expiry and dispute windows", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

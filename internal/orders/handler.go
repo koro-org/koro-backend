@@ -62,8 +62,10 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "orders", huma.Operation{
 		OperationID: "listOrgOrders", Method: http.MethodGet, Path: "/orgs/{org_id}/orders",
-		Summary:     "List the orders of a company",
-		Description: "Newest placement first.",
+		Summary: "List the orders of a company",
+		Description: "Newest placement first. event_id keeps the orders with a line of that event (one that did not drop " +
+			"out of its unpaid order), the orders of the event row of getCompanyStats sponsorship (BE-199); an event " +
+			"the company bought nothing of gives an empty list.",
 	}, op.Meta{Action: string(authz.OrdersOrderList), Surface: op.SurfaceOrg}, h.listOrg)
 
 	op.Register(api, "orders", huma.Operation{
@@ -105,7 +107,8 @@ func Register(api huma.API, svc Service) {
 		Description: "The seller's lines, newest first, with the order's reference, the buyer's title and seller_status: " +
 			"the order's status from this organization's own lines of it alone (Q-31, BE-141), so another seller's " +
 			"dispute, refund or delivery never shows (order_status, deprecated, carries the same value). " +
-			"A line with dropped_at left its unpaid order when the offering was cancelled.",
+			"A line with dropped_at left its unpaid order when the offering was cancelled. event_id keeps the lines " +
+			"of that event (BE-199); an event this organization sold nothing of gives an empty list.",
 	}, op.Meta{Action: string(authz.OrdersLineListSales), Surface: op.SurfaceOrg}, h.sales)
 
 	op.Register(api, "orders", huma.Operation{
@@ -569,8 +572,9 @@ func orderListOut(p OrderPage, fp string) *orderListOutput {
 type listOrgOrdersInput struct {
 	OrgPath
 	page.Params
-	Status string `query:"status" enum:"awaiting_payment,paid,in_fulfilment,completed,cancelled,expired,partially_refunded,refunded,disputed"`
-	Sort   string `query:"sort" enum:"-placed_at" doc:"-placed_at (the only order)"`
+	Status  string `query:"status" enum:"awaiting_payment,paid,in_fulfilment,completed,cancelled,expired,partially_refunded,refunded,disputed"`
+	Sort    string `query:"sort" enum:"-placed_at" doc:"-placed_at (the only order)"`
+	EventID string `query:"event_id" format:"uuid" doc:"Only the orders with a line of this event (BE-199)"`
 }
 
 func (h handler) listOrg(ctx context.Context, in *listOrgOrdersInput) (*orderListOutput, error) {
@@ -578,12 +582,16 @@ func (h handler) listOrg(ctx context.Context, in *listOrgOrdersInput) (*orderLis
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("listOrgOrders", in.OrgID, in.Status)
+	ev, err := httpx.OptID("query.event_id", in.EventID)
+	if err != nil {
+		return nil, err
+	}
+	fp := page.Fingerprint("listOrgOrders", in.OrgID, in.Status, in.EventID)
 	after, err := timeCursor(in.Cursor, sortPlaced, fp)
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListOrgOrders(ctx, a, httpx.ParseID(in.OrgID), ListQuery{Status: Status(in.Status), Limit: in.Limit, After: after})
+	p, err := h.svc.ListOrgOrders(ctx, a, httpx.ParseID(in.OrgID), ListQuery{Status: Status(in.Status), EventID: ev, Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}
@@ -757,6 +765,7 @@ type salesInput struct {
 	OrgPath
 	page.Params
 	FulfillmentStatus string `query:"fulfillment_status" enum:"not_applicable,pending,marked,fulfilled,disputed,cancelled"`
+	EventID           string `query:"event_id" format:"uuid" doc:"Only the lines of this event (BE-199)"`
 }
 
 type salesOutput struct {
@@ -773,12 +782,17 @@ func (h handler) sales(ctx context.Context, in *salesInput) (*salesOutput, error
 	if err != nil {
 		return nil, err
 	}
-	fp := page.Fingerprint("listOrgSales", in.OrgID, in.FulfillmentStatus)
+	ev, err := httpx.OptID("query.event_id", in.EventID)
+	if err != nil {
+		return nil, err
+	}
+	fp := page.Fingerprint("listOrgSales", in.OrgID, in.FulfillmentStatus, in.EventID)
 	after, err := timeCursor(in.Cursor, sortCreated, fp)
 	if err != nil {
 		return nil, err
 	}
-	p, err := h.svc.ListOrgSales(ctx, a, httpx.ParseID(in.OrgID), SalesQuery{Fulfillment: Fulfillment(in.FulfillmentStatus), Limit: in.Limit, After: after})
+	p, err := h.svc.ListOrgSales(ctx, a, httpx.ParseID(in.OrgID), SalesQuery{Fulfillment: Fulfillment(in.FulfillmentStatus), EventID: ev,
+		Limit: in.Limit, After: after})
 	if err != nil {
 		return nil, err
 	}

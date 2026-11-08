@@ -282,6 +282,10 @@ func (s gormStore) ListOrgOrders(ctx context.Context, orgID uuid.UUID, f OrderFi
 	if f.Status != "" {
 		q = q.Where("status = ?", f.Status)
 	}
+	if f.EventID != nil {
+		q = q.Where(`EXISTS (SELECT 1 FROM order_lines l WHERE l.order_id = orders.id AND l.org_id = orders.org_id
+		    AND l.event_id = ? AND l.dropped_at IS NULL)`, *f.EventID)
+	}
 	var rows []Order
 	if err := keyset(q, "placed_at", after).Order("placed_at DESC, id DESC").Limit(limit).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("orders: list org orders: %w", err)
@@ -323,6 +327,9 @@ func (s gormStore) ListSales(ctx context.Context, sellerOrgID uuid.UUID, f Sales
 	q := db.Conn(ctx, s.orm).Where("seller_org_id = ?", sellerOrgID)
 	if f.Fulfillment != "" {
 		q = q.Where("fulfillment_status = ?", f.Fulfillment)
+	}
+	if f.EventID != nil {
+		q = q.Where("event_id = ?", *f.EventID)
 	}
 	var rows []Line
 	if err := keyset(q, "created_at", after).Order("created_at DESC, id DESC").Limit(limit).Find(&rows).Error; err != nil {

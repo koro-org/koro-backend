@@ -87,7 +87,14 @@ func (w *identityWiring) useMemStore() {
 	w.secrets = testEnvelope()
 	w.memChallenges = true
 	w.sms = smsfake.New() // BE-172: SMS in memory (matrix 202s, wiring)
+	w.pace = noPace{}     // BE-195: the answer floor is measured in TestWire_IdentityResetAnswerFloor
 }
+
+// noPace answers at once (identity.Pacer): the in-memory container skips
+// the answer floor of the password reset operations.
+type noPace struct{}
+
+func (noPace) Start(time.Duration) func(context.Context) { return func(context.Context) {} }
 
 // testEnvelope seals TOTP secrets in tests (fixed local KEK).
 var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
@@ -423,6 +430,66 @@ func TestWire_ChangePasswordPastRequestBudget_503(t *testing.T) {
 	if _, err := e.resolve(t.Context(), httpx.TransportCookie, other); !errors.Is(err, problem.ErrUnauthenticated) {
 		t.Fatalf("other session after the retry: %v, want closed", err)
 	}
+}
+
+// TestWire_IdentityResetAnswerFloor: with the production pacer (no seam),
+// requestPasswordReset and confirmPasswordResetSms answer over HTTP after
+// exactly identity.ResetAnswerFloor, for an unknown and a known address
+// alike (BE-195). Measured in a synctest bubble: the floor costs no
+// wall-clock time.
+func TestWire_IdentityResetAnswerFloor(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	store := identity.NewMemStore(clock.Real().Now)
+	c.identity.store, c.identity.pace = store, nil // the production timer
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	e := &actorEnv{c: c, store: store, clk: c.infra.clock}
+	known := e.user(t, nil)
+	app, err := httpx.New(httpx.Deps{Log: obs.Discard(), Actors: c.actors})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.registerRoutes(app.V1)
+	do := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	// Warm the stack up outside the bubble (lazy initialisation stays
+	// out of it).
+	if rec := do(t.Context(), http.MethodGet, "/api/v1/me", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /me = %d %s", rec.Code, rec.Body)
+	}
+	const newPW = "Yepyeni-Sifre-Matris-77"
+	cases := []struct {
+		name, path, body string
+		want             int
+	}{
+		{"reset request, unknown address", "/api/v1/auth/password-resets", `{"email":"nobody@actor.koro.test"}`, http.StatusAccepted},
+		{"reset request, known address", "/api/v1/auth/password-resets", `{"email":"` + known.Email + `"}`, http.StatusAccepted},
+		{"SMS reset, unknown address", "/api/v1/auth/password-resets/sms/confirm",
+			`{"email":"nobody@actor.koro.test","code":"000000","new_password":"` + newPW + `"}`, http.StatusUnprocessableEntity},
+		{"SMS reset, known address", "/api/v1/auth/password-resets/sms/confirm",
+			`{"email":"` + known.Email + `","code":"000000","new_password":"` + newPW + `"}`, http.StatusUnprocessableEntity},
+	}
+	synctest.Test(t, func(t *testing.T) {
+		for _, tc := range cases {
+			start := time.Now()
+			rec := do(t.Context(), http.MethodPost, tc.path, tc.body)
+			if rec.Code != tc.want {
+				t.Fatalf("%s = %d %s, want %d", tc.name, rec.Code, rec.Body, tc.want)
+			}
+			if took := time.Since(start); took != identity.ResetAnswerFloor {
+				t.Errorf("%s answered after %v, want %v", tc.name, took, identity.ResetAnswerFloor)
+			}
+		}
+	})
 }
 
 // TestWire_IdentityEmailGoesThroughNotify: the worker side of a password

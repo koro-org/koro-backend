@@ -55,6 +55,9 @@ import (
 //	         none leaves it nil (every SMS operation answers 503), mem is
 //	         smsfake, mailpit the dev SMS box (BE-178), netgsm Netgsm's
 //	         OTP route. Tests preset smsfake.
+//	pace     nil → identity's runtime timer: the password reset operations
+//	         answer after identity.ResetAnswerFloor (BE-195). The in-memory
+//	         test container presets one that answers at once.
 //
 // What identity provides to others, all set in build:
 //
@@ -95,6 +98,7 @@ type identityWiring struct {
 	domains         identity.DomainResolver
 	universityNames identity.UniversityNames
 	sms             identity.SMSSender
+	pace            identity.Pacer
 
 	// late is the container, kept for the late-bound reads above and for
 	// the matrix fixtures (student documents live in the files store).
@@ -182,7 +186,7 @@ func (w *identityWiring) build(c *container) error {
 			}
 			return nil, nil
 		},
-		Hasher: hasher, Secrets: secrets, Challenges: challenges, SMS: sender,
+		Hasher: hasher, Secrets: secrets, Challenges: challenges, SMS: sender, Pace: w.pace,
 		SMSBudget: identity.SMSBudget{PerHour: c.infra.platform.SMS.BudgetPerHour, PerDay: c.infra.platform.SMS.BudgetPerDay},
 		Domains: func(ctx context.Context, domain string) (uuid.UUID, bool, error) {
 			if w.domains != nil {

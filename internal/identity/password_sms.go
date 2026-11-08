@@ -27,6 +27,10 @@ import (
 // wrong code, an unknown address, an account that lost its eligibility or
 // one above the ceiling of tries give the same 422
 // identity.invalid_sms_code. Every session closes, as with the e-mail link.
+//
+// From the account lookup on, both operations answer after
+// ResetAnswerFloor, whatever the account's state (BE-195, pace.go); the
+// code leaves from the worker (identity.send_sms_code).
 
 // smsResetNumber returns the number a password reset of u goes to by SMS,
 // "" when u must reset by e-mail. A choice found next to a role that refuses
@@ -69,6 +73,8 @@ func (s *service) RequestPasswordResetSMS(ctx context.Context, a authz.Actor, em
 	if err := s.limitEmail(ctx, rulePasswordReset, normalized); err != nil {
 		return err
 	}
+	wait := s.resetFloor()
+	defer wait(ctx)
 	u, found, err := s.users().UserByEmail(ctx, normalized)
 	if err != nil || !found || (u.Status != StatusActive && u.Status != StatusPendingEmail) {
 		return err
@@ -128,6 +134,8 @@ func (s *service) ConfirmPasswordResetSMS(ctx context.Context, a authz.Actor, in
 	if err != nil {
 		return err
 	}
+	wait := s.resetFloor()
+	defer wait(ctx)
 	u, found, err := s.users().UserByEmail(ctx, normalized)
 	if err != nil {
 		return err

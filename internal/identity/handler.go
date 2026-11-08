@@ -79,7 +79,8 @@ func Register(api huma.API, svc Service) {
 			"(BE-172, BE-186): a 6-digit code by SMS (10 minutes; confirmPasswordResetSms) when the account's holder turned " +
 			"this on at least seven days ago (enableSmsPasswordReset; off by default), the account has a verified number, " +
 			"its SMS second step is off, it holds no org or platform role and the SMS limits, the platform's SMS budget and " +
-			"the account's daily ceiling allow it; otherwise the e-mail link, with the same answer.",
+			"the account's daily ceiling allow it; otherwise the e-mail link, with the same answer. Past the address " +
+			"check and the rate limits, every answer takes at least 0.5 s (BE-195).",
 	}, op.Meta{Action: string(authz.IdentityPasswordResetRequest), Surface: op.SurfacePublic, RateLimit: op.RateAuthPasswordReset,
 		Idempotency: op.IdempotencyOptional}, h.resetRequest)
 

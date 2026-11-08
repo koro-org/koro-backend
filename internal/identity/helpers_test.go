@@ -312,6 +312,13 @@ func (s *spyStore) InsertUser(ctx context.Context, u identity.User) error {
 	return s.MemStore.InsertUser(ctx, u)
 }
 
+// noPace answers at once: the answer floor of the password reset operations
+// is measured with the production timer in a synctest bubble
+// (reset_floor_test.go), every other test skips it.
+type noPace struct{}
+
+func (noPace) Start(time.Duration) func(context.Context) { return func(context.Context) {} }
+
 // env is an identity module over in-memory stores (05 §13.2).
 type env struct {
 	clk       *clock.Fake
@@ -367,6 +374,7 @@ func newEnv(t *testing.T, opts ...func(*identity.Deps)) *env {
 		Limiter: e.lim, Deriver: der, Consent: e.consent, Terms: e.terms, Notices: e.notices, Mailer: e.mail,
 		LinkBaseURL: "https://app.koro.test", Hasher: e.hasher, Secrets: testEnvelope(), Challenges: e.chal,
 		Memberships: func(_ context.Context, id uuid.UUID) ([]authz.Membership, error) { return e.members[id], nil },
+		Pace:        noPace{},
 	}
 	for _, o := range opts {
 		o(&d)

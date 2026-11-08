@@ -118,7 +118,8 @@ func registerPhone(api huma.API, h handler) {
 		Description: "The code of requestPasswordReset with channel sms. A wrong, used or expired code, an unknown " +
 			"address, an account that may no longer reset by SMS (the holder's choice turned off, the number changed, a role " +
 			"arrived) and one above the daily ceiling of tries all answer 422 " +
-			"identity.invalid_sms_code. Every session of the account is closed.",
+			"identity.invalid_sms_code. Every session of the account is closed. Past the address check, every answer " +
+			"takes at least 0.5 s (BE-195).",
 	}, op.Meta{Action: string(authz.IdentityPasswordReset), Surface: op.SurfacePublic, RateLimit: op.RateAuthPasswordReset,
 		Idempotency: op.IdempotencyOptional}, h.resetConfirmSMS)
 }

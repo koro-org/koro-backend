@@ -18,7 +18,9 @@
 //   - No account enumeration: login does one argon2id verification for
 //     every request (a dummy one for unknown or locked accounts); register,
 //     resend and reset answer 202 whether the address exists or not, and
-//     register hashes the password in both cases (ASVS 6.3.8).
+//     register hashes the password in both cases (ASVS 6.3.8). The password
+//     reset operations that look an account up by its address answer after
+//     the same floor whatever its state (ResetAnswerFloor, pace.go).
 //   - E-mail tokens are derived (HMAC, crypto.Deriver) from the token row's
 //     ID and never stored or put into an event: the worker re-derives them.
 //   - Passwords, tokens and addresses are never logged.
@@ -378,6 +380,11 @@ type Deps struct {
 	// SMS_BUDGET_PER_HOUR, SMS_BUDGET_PER_DAY); a value left at zero takes
 	// DefaultSMSBudget's.
 	SMSBudget SMSBudget
+
+	// Pace holds the answers of the password reset operations until
+	// ResetAnswerFloor has passed (BE-195, pace.go). nil → a runtime timer
+	// (production); tests preset one that answers at once.
+	Pace Pacer
 }
 
 func (d *Deps) validate() error {
@@ -437,6 +444,9 @@ func (m Module) UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uu
 func New(d Deps) (Module, error) {
 	if err := d.validate(); err != nil {
 		return Module{}, err
+	}
+	if d.Pace == nil {
+		d.Pace = timerPacer{}
 	}
 	s := &service{d: d, smsBudget: newSMSBudgetRules(d.SMSBudget), smsCounts: newSMSCounters()}
 	s.students = eduStudents{s: s}

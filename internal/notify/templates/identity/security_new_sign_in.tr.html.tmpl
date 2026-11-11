@@ -1,0 +1,5 @@
+<p style="margin:0 0 12px 0;">Merhaba {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Koro hesabınıza daha önce kullanmadığınız bir cihazdan ya da ağdan giriş yapıldı.</p>
+<p style="margin:0 0 12px 0;">{{with index .Data "device"}}Cihaz: {{if eq . "Koro app"}}Koro uygulaması{{else if eq . "Android app"}}Android uygulaması{{else if eq . "iOS app"}}iOS uygulaması{{else if eq . "Other"}}tanınmayan bir istemci{{else}}{{.}}{{end}}{{with index $.Data "client"}} ({{if eq . "mobile"}}mobil{{else}}web{{end}}){{end}}<br>{{end}}{{with index .Data "at"}}Zaman: {{datetime .}} (Türkiye saati){{end}}</p>
+<p style="margin:0 0 12px 0;">Bu giriş sizseniz bir şey yapmanız gerekmez.</p>
+<p style="margin:0;">Siz değilseniz <a href="{{index .Data "reset_link"}}" style="color:#1d4ed8;">parolanızı hemen sıfırlayın</a>. Açık oturumlarınızı <a href="{{index .Data "link"}}" style="color:#1d4ed8;">güvenlik ayarlarınızdan</a> görüp kapatabilirsiniz.</p>

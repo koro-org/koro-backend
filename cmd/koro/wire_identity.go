@@ -240,6 +240,7 @@ func (w *identityWiring) build(c *container) error {
 }
 
 // tasks: identity.email_token_issued → identity.send_email_token,
+// identity.new_sign_in_detected → identity.send_new_sign_in_alert (BE-209),
 // identity.send_sms_code and identity.sms_codes_cleanup (BE-172),
 // file.rejected → identity.remove_rejected_document (T-176); the
 // identity.send_security_notice, identity.send_role_alert and

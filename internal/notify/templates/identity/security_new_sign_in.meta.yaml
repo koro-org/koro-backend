@@ -1,0 +1,12 @@
+version: 1
+category: transactional
+# BE-209 (Q-64): the new sign-in alert (identity.new_sign_in_detected →
+# identity.send_new_sign_in_alert). The e-mail names the device family, the
+# client kind and the time of the sign-in, never the address or the network;
+# the in-app and push texts are fixed, with no personal data, and link to the
+# security settings (/me/security). Preference security: it cannot be
+# switched off on any channel (02 §6.5 CHECK); the device's own notification
+# settings still govern push.
+preference: security
+channels: [email, in_app, push]
+priority: high

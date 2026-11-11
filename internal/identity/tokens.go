@@ -101,6 +101,21 @@ var alertChannels = []notify.Channel{notify.ChannelInApp, notify.ChannelPush}
 // (notify's catalog, BE-205).
 var securityLink = notify.MySecurityLink()
 
+// alertMessages are the in-app notification and the push of a security
+// alert of template for u: the fixed texts, the security settings link, no
+// data and the dedupe key key:<channel> (BE-205; the new sign-in alert,
+// BE-209).
+func alertMessages(u User, template, key string) []notify.Message {
+	msgs := make([]notify.Message, 0, len(alertChannels))
+	for _, ch := range alertChannels {
+		msgs = append(msgs, notify.Message{
+			UserID: &u.ID, Channel: ch, Category: notify.CategoryTransactional, Template: template,
+			Locale: u.Locale, LinkPath: securityLink, DedupeKey: key + ":" + string(ch),
+		})
+	}
+	return msgs
+}
+
 // issueToken opens a new e-mail token of purpose for u in the transaction
 // carried by ctx: the open tokens of the same purpose close, the row keeps
 // only the SHA-256 of the derived token, and identity.email_token_issued
@@ -238,12 +253,7 @@ func (s *service) handleSecurityNotice(ctx context.Context, payload []byte) erro
 	key := "identity.security:" + n.Ref.String()
 	var msgs []notify.Message
 	if alertKinds[n.Kind] {
-		for _, ch := range alertChannels {
-			msgs = append(msgs, notify.Message{
-				UserID: &u.ID, Channel: ch, Category: notify.CategoryTransactional, Template: alertTemplate(n.Kind),
-				Locale: u.Locale, LinkPath: securityLink, DedupeKey: key + ":" + string(ch),
-			})
-		}
+		msgs = alertMessages(u, alertTemplate(n.Kind), key)
 	}
 	mail := notify.Message{
 		UserID: &u.ID, ToEmail: u.Email, Channel: notify.ChannelEmail, Category: notify.CategoryTransactional,

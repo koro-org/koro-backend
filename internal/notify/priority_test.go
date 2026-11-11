@@ -27,7 +27,8 @@ func TestTemplates_PushPriority(t *testing.T) {
 	// The in-app and push alerts of the security notices (BE-205).
 	for _, kind := range []string{"password_changed", "email_change_requested", "email_changed", "mfa_enabled",
 		"mfa_disabled", "recovery_code_used", "recovery_codes_regenerated", "mfa_reset", "phone_verified",
-		"phone_removed", "sms_mfa_enabled", "sms_mfa_disabled", "sms_reset_enabled", "sms_reset_disabled"} {
+		"phone_removed", "sms_mfa_enabled", "sms_mfa_disabled", "sms_reset_enabled", "sms_reset_disabled",
+		"new_sign_in"} { // BE-209: e-mail, in-app and push
 		high["identity.security_"+kind] = true
 	}
 	for _, id := range tpl.IDs() {

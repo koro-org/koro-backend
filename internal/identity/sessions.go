@@ -137,7 +137,9 @@ func (s *service) CreateSession(ctx context.Context, a authz.Actor, in Login) (L
 
 // openSession opens a session of u after the last factor (password, or
 // the second factor: factor is totp, recovery_code or sms, audited as
-// metadata.mfa) and resets the lockout counter. Only TOTP and a recovery
+// metadata.mfa) and resets the lockout counter. A sign-in from a device or
+// a network the account has not used writes its alert in the same
+// transaction (metadata.new_sign_in; sign_in_alert.go, BE-209). Only TOTP and a recovery
 // code make the session MFA-verified: an SMS sign-in never does, so it can
 // never open a role path that requires MFA (03 §6.4; BE-172, SIM swap).
 // newHash replaces the password hash when the parameters changed (05 §14.1
@@ -175,6 +177,12 @@ func (s *service) openSession(ctx context.Context, u User, client ClientKind, la
 		if err != nil {
 			return err
 		}
+		// Before the insert and under the row lock: the session is compared
+		// with the account's earlier ones only (BE-209).
+		alert, err := s.newSignIn(ctx, cur, sess)
+		if err != nil {
+			return err
+		}
 		if cur.LastLoginAt != nil {
 			prevLogin = *cur.LastLoginAt
 		}
@@ -188,7 +196,16 @@ func (s *service) openSession(ctx context.Context, u User, client ClientKind, la
 		if err := s.sessions().InsertSession(ctx, sess); err != nil {
 			return err
 		}
-		return s.d.Audit.Log(ctx, byUser(event(authz.IdentitySessionCreate, audit.Success, resourceSession, sess.ID, meta), u.ID))
+		m := meta
+		if alert {
+			// Same transaction: the session and its alert commit together.
+			if err := s.emitNewSignIn(ctx, sess); err != nil {
+				return err
+			}
+			m = maps.Clone(meta)
+			m["new_sign_in"] = true
+		}
+		return s.d.Audit.Log(ctx, byUser(event(authz.IdentitySessionCreate, audit.Success, resourceSession, sess.ID, m), u.ID))
 	})
 	if err != nil {
 		return LoginResult{}, err

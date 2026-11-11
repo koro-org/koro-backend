@@ -199,6 +199,19 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if len(page2) != 1 || page2[0].ID != b.ID {
 			t.Fatalf("ActiveSessions after = %v", ids(page2))
 		}
+		// RecentSessions: every row of the user, revoked and ended ones too,
+		// newest first, at most limit (BE-209).
+		recent, err := s.RecentSessions(ctx, u.ID, 10)
+		if err != nil || !slices.Equal(ids(recent), []uuid.UUID{c.ID, b.ID, a.ID}) || recent[2].RevokedAt == nil ||
+			recent[0].IP != "203.0.113.9" || recent[0].UserAgent != "UA" || recent[0].ClientKind != identity.ClientWeb {
+			t.Fatalf("RecentSessions = %v, %v", ids(recent), err)
+		}
+		if two, _ := s.RecentSessions(ctx, u.ID, 2); !slices.Equal(ids(two), []uuid.UUID{c.ID, b.ID}) {
+			t.Fatalf("RecentSessions limit 2 = %v", ids(two))
+		}
+		if theirs, err := s.RecentSessions(ctx, uuid.NewV7(), 10); err != nil || len(theirs) != 0 {
+			t.Fatalf("RecentSessions of another user = %v, %v", ids(theirs), err)
+		}
 		if n, err := s.RevokeUserSessions(ctx, u.ID, &c.ID, contractBase.Add(4*time.Minute), identity.RevokePasswordChange); err != nil || n != 1 {
 			t.Fatalf("RevokeUserSessions = %d, %v", n, err)
 		}

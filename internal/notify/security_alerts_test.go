@@ -8,11 +8,12 @@ import (
 	"koro/internal/notify"
 )
 
-// TestSend_SecurityAlertsReachInboxAndPush (BE-205): every in-app and push
-// alert of identity's security notices (identity.security_<kind>) goes out
-// with the security settings link, at high push priority, to every push
-// surface: the security category cannot be switched off on any channel
-// (02 §6.5 CHECK; the store refuses the row, Allowed never asks).
+// TestSend_SecurityAlertsReachInboxAndPush (BE-205, BE-209): every in-app
+// and push alert of identity's security notices (identity.security_<kind>,
+// the new sign-in alert included) goes out with the security settings link,
+// at high push priority, to every push surface: the security category
+// cannot be switched off on any channel (02 §6.5 CHECK; the store refuses
+// the row, Allowed never asks).
 func TestSend_SecurityAlertsReachInboxAndPush(t *testing.T) {
 	t.Parallel()
 	rec := &recordingPush{}
@@ -27,8 +28,10 @@ func TestSend_SecurityAlertsReachInboxAndPush(t *testing.T) {
 			alerts = append(alerts, id)
 		}
 	}
-	if len(alerts) != 14 {
-		t.Fatalf("found %d security alert templates, want 14: %v", len(alerts), alerts)
+	// The 14 alerts of BE-205 and the new sign-in alert (BE-209), which
+	// also serves its e-mail.
+	if len(alerts) != 15 {
+		t.Fatalf("found %d security alert templates, want 15: %v", len(alerts), alerts)
 	}
 	uid := newID()
 	for _, ch := range notify.PrefChannels() {

@@ -1,0 +1,5 @@
+<p style="margin:0 0 12px 0;">Hello {{.Data.name}},</p>
+<p style="margin:0 0 12px 0;">Someone signed in to your Koro account from a device or network you haven't used before.</p>
+<p style="margin:0 0 12px 0;">{{with index .Data "device"}}Device: {{if eq . "Other"}}an unrecognized client{{else}}{{.}}{{end}}{{with index $.Data "client"}} ({{if eq . "mobile"}}mobile{{else}}web{{end}}){{end}}<br>{{end}}{{with index .Data "at"}}Time: {{datetime .}} (Türkiye time){{end}}</p>
+<p style="margin:0 0 12px 0;">If this was you, there is nothing to do.</p>
+<p style="margin:0;">If this was not you, <a href="{{index .Data "reset_link"}}" style="color:#1d4ed8;">reset your password now</a>. You can see and sign out your open sessions in your <a href="{{index .Data "link"}}" style="color:#1d4ed8;">security settings</a>.</p>

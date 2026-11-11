@@ -1,0 +1,11 @@
+Hello {{.Data.name}},
+
+Someone signed in to your Koro account from a device or network you haven't used before.
+{{with index .Data "device"}}
+Device: {{if eq . "Other"}}an unrecognized client{{else}}{{.}}{{end}}{{with index $.Data "client"}} ({{if eq . "mobile"}}mobile{{else}}web{{end}}){{end}}{{end}}{{with index .Data "at"}}
+Time: {{datetime .}} (Türkiye time){{end}}
+
+If this was you, there is nothing to do.
+
+If this was not you, reset your password now: {{index .Data "reset_link"}}
+You can see and sign out your open sessions in your security settings: {{index .Data "link"}}

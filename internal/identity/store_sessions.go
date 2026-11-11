@@ -6,9 +6,9 @@ import (
 	"uuid"
 )
 
-// sessionStore is the sessions rows (02 §5.2): login, authentication and
-// its sliding idle window, step-up, logout and every revocation, the
-// caller's session list and the cleanup job (jobs.go).
+// sessionStore is the sessions rows (02 §5.2): login (and its new sign-in
+// alert), authentication and its sliding idle window, step-up, logout and
+// every revocation, the caller's session list and the cleanup job (jobs.go).
 type sessionStore interface {
 	// InsertSession writes a session.
 	InsertSession(ctx context.Context, s Session) error
@@ -33,6 +33,11 @@ type sessionStore interface {
 	// both windows at now) of userID, newest first (id DESC), after the
 	// session ID after (nil: from the start).
 	ActiveSessions(ctx context.Context, userID uuid.UUID, now time.Time, after *uuid.UUID, limit int) ([]Session, error)
+	// RecentSessions returns up to limit of userID's session rows, newest
+	// first (id DESC), whatever their state: live, expired or revoked, as
+	// long as identity.sessions_cleanup has not removed them (30 days after
+	// they ended). The sign-in's own history (new sign-in alert, BE-209).
+	RecentSessions(ctx context.Context, userID uuid.UUID, limit int) ([]Session, error)
 	// UnrevokedSessionIDs returns the IDs of userID's sessions without a
 	// revocation, expired ones included until DeleteEndedSessions removes them.
 	UnrevokedSessionIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)

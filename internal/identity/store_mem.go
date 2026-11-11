@@ -357,6 +357,23 @@ func (m *MemStore) ActiveSessions(_ context.Context, userID uuid.UUID, now time.
 	return out, nil
 }
 
+// RecentSessions implements Store.
+func (m *MemStore) RecentSessions(_ context.Context, userID uuid.UUID, limit int) ([]Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Session
+	for _, s := range m.sessions {
+		if s.UserID == userID {
+			out = append(out, s.clone())
+		}
+	}
+	slices.SortFunc(out, func(a, b Session) int { return b.ID.Compare(a.ID) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // SessionsOf implements Store.
 func (m *MemStore) SessionsOf(_ context.Context, userID uuid.UUID) ([]Session, error) {
 	m.mu.Lock()

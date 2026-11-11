@@ -237,8 +237,11 @@ func searchMeta(q AdminQuery) map[string]any {
 	return m
 }
 
-// ipPrefix returns the /24 (IPv4) or /48 (IPv6) network of ip.
-func ipPrefix(ip string) string {
+// IPPrefix returns the /24 (IPv4) or /48 (IPv6) network of ip ("" when ip
+// is not an address): the network fact listMySecurityEvents shows. identity
+// compares sign-ins by it (new sign-in alert, BE-209), so the account holder
+// sees one notion of "network" everywhere.
+func IPPrefix(ip string) string {
 	a, err := netip.ParseAddr(ip)
 	if err != nil {
 		return ""
@@ -261,8 +264,11 @@ var uaFamilies = []struct{ marker, family string }{
 	{"curl/", "curl"},
 }
 
-// userAgentFamily reduces a User-Agent to its family (no version, no device).
-func userAgentFamily(ua string) string {
+// UserAgentFamily reduces a User-Agent to its family (no version, no
+// device; "" for none, "Other" for an unknown one): the device fact
+// listMySecurityEvents shows, and identity's notion of a device (new sign-in
+// alert, BE-209).
+func UserAgentFamily(ua string) string {
 	if ua == "" {
 		return ""
 	}

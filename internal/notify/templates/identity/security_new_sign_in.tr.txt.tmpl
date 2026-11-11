@@ -1,0 +1,11 @@
+Merhaba {{.Data.name}},
+
+Koro hesabınıza daha önce kullanmadığınız bir cihazdan ya da ağdan giriş yapıldı.
+{{with index .Data "device"}}
+Cihaz: {{if eq . "Koro app"}}Koro uygulaması{{else if eq . "Android app"}}Android uygulaması{{else if eq . "iOS app"}}iOS uygulaması{{else if eq . "Other"}}tanınmayan bir istemci{{else}}{{.}}{{end}}{{with index $.Data "client"}} ({{if eq . "mobile"}}mobil{{else}}web{{end}}){{end}}{{end}}{{with index .Data "at"}}
+Zaman: {{datetime .}} (Türkiye saati){{end}}
+
+Bu giriş sizseniz bir şey yapmanız gerekmez.
+
+Siz değilseniz parolanızı hemen sıfırlayın: {{index .Data "reset_link"}}
+Açık oturumlarınızı güvenlik ayarlarınızdan görüp kapatabilirsiniz: {{index .Data "link"}}

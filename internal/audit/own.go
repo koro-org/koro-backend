@@ -87,7 +87,7 @@ func securityEvent(r Record, user uuid.UUID) SecurityEvent {
 	ev := SecurityEvent{ID: r.ID, Action: r.Action, Outcome: r.Outcome, OccurredAt: r.OccurredAt}
 	switch {
 	case r.ActorUserID != nil && *r.ActorUserID == user: // the user's own request
-		ev.IPPrefix, ev.UserAgentFamily, ev.Reason = ipPrefix(r.IP), userAgentFamily(r.UserAgent), reasonCode(r.Reason)
+		ev.IPPrefix, ev.UserAgentFamily, ev.Reason = IPPrefix(r.IP), UserAgentFamily(r.UserAgent), reasonCode(r.Reason)
 	case signInAttempt(r, user): // a sign-in to the account, anonymous or from another account
 		ev.Reason, ev.Attempts, ev.FirstOccurredAt = reasonCode(r.Reason), 1, r.OccurredAt
 	case breakGlassAccess(r, user): // staff read the user's data

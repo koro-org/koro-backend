@@ -279,6 +279,18 @@ func (s gormStore) ActiveSessions(ctx context.Context, userID uuid.UUID, now tim
 	return sessions(rows), nil
 }
 
+// RecentSessions implements Store (sessions_user_history_idx).
+//
+// cross-org: sessions belong to a user, not an org.
+func (s gormStore) RecentSessions(ctx context.Context, userID uuid.UUID, limit int) ([]Session, error) {
+	var rows []sessionRow
+	if err := db.Conn(ctx, s.orm).Table("sessions").Select(sessionCols).Where("user_id = ?", userID).
+		Order("id DESC").Limit(limit).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("identity: recent sessions: %w", err)
+	}
+	return sessions(rows), nil
+}
+
 // UnrevokedSessionIDs implements Store (sessions_user_active_idx).
 //
 // cross-org: sessions belong to a user, not an org.

@@ -10,6 +10,7 @@ import (
 // Topics of the identity module (01 §6.2). Owner: identity tickets.
 const (
 	TopicIdentityEmailTokenIssued  = "identity.email_token_issued"
+	TopicIdentityNewSignInDetected = "identity.new_sign_in_detected"
 	TopicUserEduVerified           = "user.edu_verified"
 	TopicUserEduVerificationLapsed = "user.edu_verification_lapsed"
 	TopicUserActiveDay             = "user.active_day"
@@ -17,6 +18,7 @@ const (
 
 var _ = register(
 	spec("identity", Outbox, IdentityEmailTokenIssued{}),
+	spec("identity", Outbox, IdentityNewSignInDetected{}),
 	spec("identity", Outbox, UserEduVerified{}),
 	spec("identity", Outbox, UserEduVerificationLapsed{}),
 	spec("identity", AfterCommit, UserActiveDay{}),
@@ -33,6 +35,18 @@ type IdentityEmailTokenIssued struct {
 
 // Topic implements Payload.
 func (IdentityEmailTokenIssued) Topic() string { return TopicIdentityEmailTokenIssued }
+
+// IdentityNewSignInDetected: a session opened from a device or a network
+// the account had not used (BE-209). Written in the sign-in's transaction,
+// so no later request of that session can hold the alert back; the worker
+// sends it by e-mail, in the app and by push (identity.send_new_sign_in_alert).
+type IdentityNewSignInDetected struct {
+	UserID    uuid.UUID `json:"user_id"`
+	SessionID uuid.UUID `json:"session_id"`
+}
+
+// Topic implements Payload.
+func (IdentityNewSignInDetected) Topic() string { return TopicIdentityNewSignInDetected }
 
 // UserEduVerified: a student verification was confirmed (or renewed).
 type UserEduVerified struct {

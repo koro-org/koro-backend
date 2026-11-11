@@ -334,12 +334,12 @@ type PasswordHasher interface {
 type Deps struct {
 	Store   Store
 	Tx      db.TxManager
-	Outbox  outbox.Writer  // identity.email_token_issued (O), user.active_day (A)
+	Outbox  outbox.Writer  // identity.email_token_issued, identity.new_sign_in_detected (O), user.active_day (A)
 	Queue   queue.Enqueuer // identity.send_security_notice (A, no topic)
 	Audit   AuditLogger
 	Clock   clock.Clock
 	Log     *slog.Logger
-	Limiter Limiter         // auth_email, auth_password_reset and reauth in the service (06 H-6)
+	Limiter Limiter         // auth_email, auth_password_reset and reauth in the service (06 H-6); the new sign-in alert cap (BE-209)
 	Deriver *crypto.Deriver // e-mail tokens (CRYPTO_TOKEN_KEYS) and the e-mail digest of rate limit keys
 	Consent ConsentRecorder // registration consents (same transaction)
 	Terms   TermsLedger     // terms of use acceptances (registration, acceptTerms, getMe, the terms gate; BE-124)

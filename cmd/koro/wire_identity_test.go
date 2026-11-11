@@ -37,6 +37,7 @@ import (
 	"koro/internal/platform/passwd"
 	"koro/internal/platform/privacy"
 	"koro/internal/platform/problem"
+	"koro/internal/platform/queue"
 	"koro/internal/platform/sms/smsfake"
 	"koro/internal/platform/token"
 )
@@ -110,7 +111,7 @@ var testEnvelope = sync.OnceValue(func() *crypto.Envelope {
 })
 
 // TestWire_IdentityTasksAndPrivacy pins what identity registers (01 §6.2,
-// §7): the e-mail token subscription, the notice tasks (BE-124: the terms
+// §7): the e-mail token and new sign-in alert (BE-209) subscriptions, the notice tasks (BE-124: the terms
 // of use fan-out and notice), the cleanup and student verification jobs
 // and the KVKK provider.
 func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
@@ -135,6 +136,11 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	if len(subs) != 1 || subs[0].Name != identity.SendEmailTokenTaskName {
 		t.Fatalf("identity.email_token_issued subscriptions %+v", subs)
 	}
+	// BE-209: the new sign-in alert, on the critical queue.
+	if subs := c.infra.subs.For(domainevent.TopicIdentityNewSignInDetected); len(subs) != 1 ||
+		subs[0].Name != identity.SendNewSignInAlertTaskName || subs[0].Queue != queue.Critical {
+		t.Fatalf("identity.new_sign_in_detected subscriptions %+v", subs)
+	}
 	if !slices.ContainsFunc(c.infra.subs.For(domainevent.TopicMembershipStarted), func(s outbox.Subscription) bool {
 		return s.Name == identity.CloseSMSResetTaskName
 	}) {
@@ -144,7 +150,8 @@ func TestWire_IdentityTasksAndPrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendSecurityNoticeTaskName, identity.SendRoleAlertTaskName,
+	for _, name := range []string{identity.SendEmailTokenTaskName, identity.SendNewSignInAlertTaskName,
+		identity.SendSecurityNoticeTaskName, identity.SendRoleAlertTaskName,
 		identity.SessionsCleanupJobName, identity.EmailTokensCleanupJobName, identity.SendEduNoticeTaskName,
 		identity.EduExpireJobName, identity.EduRenewalRemindersJobName,
 		identity.NotifyTermsPublishedTaskName, identity.SendTermsNoticeTaskName,

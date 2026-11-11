@@ -2,7 +2,7 @@
 # distroless, non-root. Base images are pinned by version + digest ("latest"
 # is forbidden); comments stay on their own lines.
 # Build: docker build -f deploy/Dockerfile --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t koro:<sha> .
-FROM golang:1.27.3@sha256:f24164268fc1e741bbdc0066dbadcf1c8426c5a8489f0729c02c3905a53032fd AS build
+FROM golang:1.27.4@sha256:08bcb99a38f85a265f9a93d1d3323e2440eec333380f3ea26ee0dec9264bb41c AS build
 ARG GIT_SHA=dev
 ENV GOTOOLCHAIN=local \
     GOFLAGS=-mod=readonly \

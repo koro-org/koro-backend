@@ -1,0 +1,182 @@
+# Authz matrix of the ingest module (03 §5.25, 04 §2.25 doc patches; BE-210). 17 operations × 18 personas.
+# The collected events are public (P): every persona — anonymous included — lists and reads them and may ask
+# that one be removed (202; it is hidden at once). The suggestions are the club's management surface (03 §3.6):
+# the club's club_admin lists, promotes (an ordinary draft, events.event.create) and rejects; a club member
+# without the role 403; everyone else 404; platform staff see the surface (403) and platform_admin lists it
+# (200) but never promotes or rejects for a club. Every other operation is the admin surface (03 §7.2-3):
+# platform_admin only, 403 without the role. Another club's imported event on a club's path is 404 (06 H-38:
+# the scope comes from the row).
+version: 1
+groups:
+  no_platform_role_ing: [user_unverified, student, student_minor, club_member, club_admin, other_club_admin,
+                         event_staff, university_rep, company_member, company_admin, other_company_member]
+  other_staff_ing: [moderator, support, dpo, finance_admin, talent_auditor]
+
+operations:
+  listImportedEvents:
+    method: GET
+    path: /api/v1/imported-events
+    action: ingest.imported_event.list
+    public: true
+    expect: { "@all": 200 }
+    variants:
+      - name: of_a_university
+        query: { university_id: "{{fixture:uni_a_university}}" }
+        expect: { "@all": 200 }
+
+  getImportedEvent:
+    method: GET
+    path: /api/v1/imported-events/{imported_event_id}
+    action: ingest.imported_event.read
+    public: true
+    path_params: { imported_event_id: ingest_event_a }
+    expect: { "@all": 200 }
+    variants:
+      - name: hidden
+        path_params: { imported_event_id: ingest_event_hidden }
+        note: a hidden event is off the public surface
+        expect: { "@all": 404 }
+      - name: unknown
+        path_params: { imported_event_id: "literal:00000000-0000-7000-8000-0000000000e1" }
+        expect: { "@all": 404 }
+
+  requestImportedEventRemoval:
+    method: POST
+    path: /api/v1/imported-events/{imported_event_id}/removal-requests
+    action: ingest.imported_event.request_removal
+    public: true
+    path_params: { imported_event_id: ingest_event_a }
+    body: bodies/ingest/removal.json
+    note: no account needed (the person a page names may have none); the event is hidden at once
+    expect: { "@all": 202 }
+    variants:
+      - name: hidden
+        path_params: { imported_event_id: ingest_event_hidden }
+        expect: { "@all": 404 }
+
+  listClubImportedEvents:
+    method: GET
+    path: /api/v1/orgs/{org_id}/imported-events
+    action: ingest.suggestion.list
+    path_params: { org_id: club_a }
+    expect: { anonymous: 401, club_admin: 200, club_member: 403, "@outsiders_a": 404, platform_admin: 200,
+              "@other_staff_ing": 403 }
+    variants:
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e2" }
+        expect: { anonymous: 401, "@no_platform_role_ing": 404, "@other_staff_ing": 404, platform_admin: 404 }
+
+  promoteImportedEvent:
+    method: POST
+    path: /api/v1/orgs/{org_id}/imported-events/{imported_event_id}/promote
+    action: ingest.suggestion.promote
+    path_params: { org_id: club_a, imported_event_id: ingest_event_a }
+    expect: { anonymous: 401, club_admin: 201, club_member: 403, "@outsiders_a": 404, platform_admin: 403,
+              "@other_staff_ing": 403 }
+    variants:
+      - name: other_clubs_event
+        path_params: { org_id: club_a, imported_event_id: ingest_event_b }
+        note: IDOR — club_b's imported event on club_a's path (06 H-38)
+        expect: { anonymous: 401, club_admin: 404, club_member: 403, "@outsiders_a": 404, platform_admin: 403,
+                  "@other_staff_ing": 403 }
+
+  rejectImportedEvent:
+    method: POST
+    path: /api/v1/orgs/{org_id}/imported-events/{imported_event_id}/reject
+    action: ingest.suggestion.reject
+    path_params: { org_id: club_a, imported_event_id: ingest_event_a }
+    expect: { anonymous: 401, club_admin: 204, club_member: 403, "@outsiders_a": 404, platform_admin: 403,
+              "@other_staff_ing": 403 }
+    variants:
+      - name: other_clubs_event
+        path_params: { org_id: club_a, imported_event_id: ingest_event_b }
+        expect: { anonymous: 401, club_admin: 404, club_member: 403, "@outsiders_a": 404, platform_admin: 403,
+                  "@other_staff_ing": 403 }
+
+  adminListIngestSources:
+    method: GET
+    path: /api/v1/admin/ingest/sources
+    action: ingest.source.list
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+
+  adminCreateIngestSource:
+    method: POST
+    path: /api/v1/admin/ingest/sources
+    action: ingest.source.create
+    body: bodies/ingest/create_source.json
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 201 }
+
+  adminAddPilotIngestSources:
+    method: POST
+    path: /api/v1/admin/ingest/pilot-sources
+    action: ingest.source.create
+    body: bodies/ingest/pilot.json
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+
+  adminGetIngestSource:
+    method: GET
+    path: /api/v1/admin/ingest/sources/{source_id}
+    action: ingest.source.read
+    path_params: { source_id: ingest_source_on }
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+    variants:
+      - name: unknown
+        path_params: { source_id: "literal:00000000-0000-7000-8000-0000000000e3" }
+        expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 404 }
+
+  adminUpdateIngestSource:
+    method: POST
+    path: /api/v1/admin/ingest/sources/{source_id}/settings
+    action: ingest.source.update
+    path_params: { source_id: ingest_source_on }
+    body: bodies/ingest/settings.json
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+
+  adminRunIngestSource:
+    method: POST
+    path: /api/v1/admin/ingest/sources/{source_id}/run
+    action: ingest.source.run
+    path_params: { source_id: ingest_source_on }
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 202 }
+
+  adminListImportedEvents:
+    method: GET
+    path: /api/v1/admin/ingest/imported-events
+    action: ingest.imported_event.list_admin
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+    variants:
+      - name: hidden
+        query: { status: hidden }
+        expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+
+  adminSetImportedEventStatus:
+    method: POST
+    path: /api/v1/admin/ingest/imported-events/{imported_event_id}/status
+    action: ingest.imported_event.moderate
+    path_params: { imported_event_id: ingest_event_a }
+    body: bodies/ingest/status.json
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+
+  adminDeleteImportedEvent:
+    method: DELETE
+    path: /api/v1/admin/ingest/imported-events/{imported_event_id}
+    action: ingest.imported_event.delete
+    path_params: { imported_event_id: ingest_event_a }
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 204 }
+
+  adminListImportedClubs:
+    method: GET
+    path: /api/v1/admin/ingest/clubs
+    action: ingest.imported_club.list
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+    variants:
+      - name: needs_review
+        query: { needs_review: "true" }
+        expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 200 }
+
+  adminMarkImportedClubReviewed:
+    method: POST
+    path: /api/v1/admin/ingest/clubs/{club_id}/reviewed
+    action: ingest.imported_club.review
+    path_params: { club_id: club_unclaimed }
+    expect: { anonymous: 401, "@no_platform_role_ing": 403, "@other_staff_ing": 403, platform_admin: 204 }

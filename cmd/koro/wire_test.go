@@ -14,7 +14,7 @@ import (
 	"koro/internal/platform/obs"
 )
 
-// designLayers is docs/design/01 §5.1 (L1…L13; stats: BE-163; recommend: BE-174). The module order of
+// designLayers is docs/design/01 §5.1 (L1…L13; stats: BE-163; recommend: BE-174; ingest: BE-210). The module order of
 // container.modules() must match it; change the design first, then this
 // table (frozen with wire.go after P0).
 var designLayers = [][]string{
@@ -30,7 +30,7 @@ var designLayers = [][]string{
 	{"messaging", "orders"},
 	{"ledger", "billing"},
 	{"payments"},
-	{"kvkk", "stats", "recommend"},
+	{"kvkk", "stats", "recommend", "ingest"},
 }
 
 // memStoreUser is implemented by every <module>Wiring in its
@@ -77,8 +77,8 @@ func TestWire_LayerOrderMatchesDesign(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("container.modules() order differs from 01 §5.1:\n got  %v\n want %v", got, want)
 	}
-	if len(got) != 24 {
-		t.Fatalf("expected 24 feature modules, got %d", len(got))
+	if len(got) != 25 {
+		t.Fatalf("expected 25 feature modules, got %d", len(got))
 	}
 
 	// Every *Wiring field of the container is in the table (no module is

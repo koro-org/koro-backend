@@ -80,7 +80,7 @@ type Platform struct {
 	SMS         SMS // BE-172: the SMS port (identity's one-time codes)
 }
 
-// Modules groups the sections of the 24 feature modules (01 §2), in layer
+// Modules groups the sections of the 25 feature modules (01 §2), in layer
 // order (01 §5.1). Modules run in both the API and the worker.
 type Modules struct {
 	Audit        Audit
@@ -107,6 +107,7 @@ type Modules struct {
 	Kvkk         Kvkk
 	Stats        Stats
 	Recommend    Recommend
+	Ingest       Ingest
 }
 
 // API is the configuration of `koro api`.

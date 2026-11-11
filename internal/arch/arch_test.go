@@ -21,13 +21,13 @@ const (
 	modPath        = "koro/internal/"      // go.mod module path + internal/
 )
 
-// layers is 01 §5.1 (L1–L13; recommend: BE-174). platform/* and authz are L0 leaves; cmd is
+// layers is 01 §5.1 (L1–L13; recommend: BE-174; ingest: BE-210). platform/* and authz are L0 leaves; cmd is
 // L14 (composition root). A new module is added to 01 first.
 var layers = map[string]int{
 	"audit": 1, "files": 2, "consent": 2, "entitlements": 2, "notify": 3, "identity": 4, "orgs": 5,
 	"directory": 6, "students": 7, "parties": 7, "events": 8, "talent": 8, "outreach": 8, "feed": 9,
 	"catalog": 9, "discovery": 9, "messaging": 10, "orders": 10, "ledger": 11, "billing": 11,
-	"payments": 12, "kvkk": 13, "stats": 13, "recommend": 13,
+	"payments": 12, "kvkk": 13, "stats": 13, "recommend": 13, "ingest": 13,
 }
 
 // talentImporters may import talent (01 §5.4); cmd/ may too.
@@ -481,9 +481,12 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 	// the reported messages it keeps in one transaction, Q-43), + orgs →
 	// feed.LogoKeeper.KeepReplacedLogo and feed → files.Files.Retire (BE-180:
 	// a logo replaced while reported is kept and leaves public media in the
-	// transaction that moves logo_file_id, T-401).
-	if len(allow) != 40 {
-		t.Fatalf("sync_writes.txt has %d lines, want 40", len(allow))
+	// transaction that moves logo_file_id, T-401), + ingest →
+	// directory.ClubImports.ImportClub and ingest → events.Service.CreateEvent
+	// (BE-210: a list's club with its import record; a promoted suggestion
+	// with its draft, in one transaction each).
+	if len(allow) != 42 {
+		t.Fatalf("sync_writes.txt has %d lines, want 42", len(allow))
 	}
 	for _, must := range []string{"kvkk files.Files.Delete", "feed entitlements.Entitlements.Release",
 		"outreach entitlements.Entitlements.Release", "feed outreach.Targeting.DiscardDispatch",
@@ -495,6 +498,7 @@ func TestSyncWritesAreAllowed(t *testing.T) {
 		"directory orgs.OrgAdmin.GrantRole", "directory orgs.OrgAdmin.Create", "orders catalog.Offerings.Release",
 		"messaging students.ContactSharing.ShareContactWithCompany", "messaging feed.MessageReports.FileMessageReport",
 		"orgs feed.LogoKeeper.KeepReplacedLogo", "feed files.Files.Retire",
+		"ingest directory.ClubImports.ImportClub", "ingest events.Service.CreateEvent",
 	} {
 		if !allow[must] {
 			t.Errorf("sync_writes.txt lacks %q", must)

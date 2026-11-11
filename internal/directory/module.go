@@ -96,6 +96,8 @@ type Catalog interface {
 // authz.Can first (05 §5.3).
 type Service interface {
 	Catalog
+	// ClubImports opens the clubs of the official lists (ingest, BE-210).
+	ClubImports
 
 	// UniversityOrgs returns the orgs of a university (its own org and its
 	// clubs) for orgs searchOrgs?university_id (T-180).

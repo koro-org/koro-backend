@@ -162,3 +162,13 @@ messaging -> feed.MessageReports.FileMessageReport
 # logo is never both deleted and named by a kept row.
 orgs      -> feed.LogoKeeper.KeepReplacedLogo
 feed      -> files.Files.Retire
+
+# BE-210 (user decision 2026-11-11, koro-docs#11; rationale for 01 §6.3 in the BE-210 ticket's doc patch): "Resmî
+# kulüp listesi içe aktarımı". A club of an official list is matched or opened (org + clubs row, directory's audit
+# record, club.updated) in the ingest transaction that writes its imported_clubs row and its site source, so a list
+# entry never leaves an unclaimed club without the record of where it came from nor a record without its club (a retry
+# finds the club by the record's key instead of opening it twice). "İçe aktarılan etkinliği taslağa çevirme": the club
+# admin's promotion creates the draft (events' own CreateEvent and authorisation) in the transaction that marks the
+# imported event promoted with the draft's ID, so a promotion never leaves a second draft behind on a retry.
+ingest    -> directory.ClubImports.ImportClub
+ingest    -> events.Service.CreateEvent

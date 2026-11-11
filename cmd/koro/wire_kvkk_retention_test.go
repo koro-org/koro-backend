@@ -55,7 +55,8 @@ func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 		"000169_create_conversations.up.sql",                      // BE-162: the conversations and their policy
 		"000177_create_user_phones.up.sql",                        // BE-172: phone numbers, SMS codes and their policy
 		"000179_seed_web_push_subscription_policy.up.sql",         // BE-177 (T-409): unused browser subscriptions, 90 days
-		"000180_snapshot_reported_orgs.up.sql"} {                  // BE-180 (T-401): the logos an org replaced while reported
+		"000180_snapshot_reported_orgs.up.sql",                    // BE-180 (T-401): the logos an org replaced while reported
+		"000187_create_ingest.up.sql"} {                           // BE-210: the events collected from official pages
 		b, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			t.Fatal(err)
@@ -83,8 +84,8 @@ func seedPolicies(t *testing.T) map[string]kvkk.Policy {
 			out[m[3]] = p
 		}
 	}
-	if len(out) != 55 { // 02 §24.2 (44) + privileged_action_history (000121) + talent_collection_off (000134) + talent_score_dropped (000142) + iys_netgsm_event (000147) + terms_acceptance (000148) + unsubscribe_link (000162) + post_media_dropped (000166) + conversation_closed (000169) + sms_code (000177) + web_push_subscription (000179) + org_logo_dropped (000180); TestSchema_RetentionSeedComplete
-		t.Fatalf("read %d seeded retention policies, want 55", len(out))
+	if len(out) != 56 { // 02 §24.2 (44) + privileged_action_history (000121) + talent_collection_off (000134) + talent_score_dropped (000142) + iys_netgsm_event (000147) + terms_acceptance (000148) + unsubscribe_link (000162) + post_media_dropped (000166) + conversation_closed (000169) + sms_code (000177) + web_push_subscription (000179) + org_logo_dropped (000180) + imported_event (000187); TestSchema_RetentionSeedComplete
+		t.Fatalf("read %d seeded retention policies, want 56", len(out))
 	}
 	return out
 }

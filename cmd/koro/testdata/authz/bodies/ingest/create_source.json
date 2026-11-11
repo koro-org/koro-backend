@@ -1,0 +1,1 @@
+{"kind": "events", "adapter": "htmlpage", "url": "https://matris.example.org/etkinlikler", "label": "Matris etkinlik sayfası", "university_id": "{{fixture:uni_a_university}}"}

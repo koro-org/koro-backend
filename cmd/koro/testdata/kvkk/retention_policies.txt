@@ -89,3 +89,5 @@ dsr_export_file               job:kvkk.purge_exports
 destruction_log               sweeper:kvkk
 breach_record                 sweeper:kvkk
 dsr_erasure                   none:a destruction_logs category of account erasures, written by the erasure run
+# ingest (BE-210): operational and data-minimising, never deferred to the legal approval
+imported_event                job:ingest.purge_expired

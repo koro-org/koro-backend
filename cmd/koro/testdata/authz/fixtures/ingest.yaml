@@ -1,0 +1,13 @@
+# Fixtures of the ingest module (cmd/koro/matrix_ingest_test.go; BE-210). IDs are authztest.ID(name).
+# Imported events start on 2026-12-01 (after the matrix clock): ingest_event_a of club_a and ingest_event_b
+# of club_b are public (status imported), ingest_event_hidden of club_a is hidden (a removal request).
+# ingest_source_on is an enabled events source of uni_a, ingest_source_off a disabled one; club_unclaimed
+# has its imported_clubs row (needs_review).
+version: 1
+fixtures:
+  ingest_event_a: { kind: imported_event, club: club_a, status: imported }
+  ingest_event_b: { kind: imported_event, club: club_b, status: imported }
+  ingest_event_hidden: { kind: imported_event, club: club_a, status: hidden }
+  ingest_source_on: { kind: source, enabled: true }
+  ingest_source_off: { kind: source, enabled: false }
+  ingest_club_unclaimed: { kind: imported_club, club: club_unclaimed }

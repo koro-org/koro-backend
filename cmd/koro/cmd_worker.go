@@ -93,6 +93,9 @@ func runWorker(ctx context.Context, stop context.CancelFunc, environ map[string]
 	if err := c.identity.metrics(tel.Metrics); err != nil { // koro_sms_codes_total (BE-181)
 		return err
 	}
+	if err := c.ingest.metrics(tel.Metrics); err != nil { // koro_ingest_*_total (BE-210)
+		return err
+	}
 	mux, err := c.workerMux(log)
 	if err != nil {
 		return err

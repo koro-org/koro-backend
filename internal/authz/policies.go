@@ -29,5 +29,6 @@ func modulePolicies() map[string]Policy {
 		"kvkk":         kvkkPolicy(),
 		"stats":        statsPolicy(),
 		"recommend":    recommendPolicy(),
+		"ingest":       ingestPolicy(),
 	}
 }

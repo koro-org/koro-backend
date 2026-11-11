@@ -924,6 +924,48 @@
     "type": "urn:koro:problem:identity.weak_password"
   },
   {
+    "code": "ingest.adapter_mismatch",
+    "status": 422,
+    "title": "Adapter, kind and scope do not fit together",
+    "type": "urn:koro:problem:ingest.adapter_mismatch"
+  },
+  {
+    "code": "ingest.invalid_state",
+    "status": 409,
+    "title": "Imported event state does not allow this",
+    "type": "urn:koro:problem:ingest.invalid_state"
+  },
+  {
+    "code": "ingest.not_fetchable",
+    "status": 422,
+    "title": "This adapter does not fetch pages",
+    "type": "urn:koro:problem:ingest.not_fetchable"
+  },
+  {
+    "code": "ingest.not_found",
+    "status": 404,
+    "title": "Not found",
+    "type": "urn:koro:problem:ingest.not_found"
+  },
+  {
+    "code": "ingest.source_exists",
+    "status": 409,
+    "title": "A source with this URL exists",
+    "type": "urn:koro:problem:ingest.source_exists"
+  },
+  {
+    "code": "ingest.unknown_pilot",
+    "status": 422,
+    "title": "Unknown pilot university",
+    "type": "urn:koro:problem:ingest.unknown_pilot"
+  },
+  {
+    "code": "ingest.url_not_allowed",
+    "status": 422,
+    "title": "URL is not allowed",
+    "type": "urn:koro:problem:ingest.url_not_allowed"
+  },
+  {
     "code": "internal_error",
     "status": 500,
     "title": "Internal server error",

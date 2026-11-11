@@ -33,6 +33,7 @@ var retentionSeedCodes = []string{
 	"sms_code",                  // 000177 (BE-172): one-time SMS codes, 7 days after their expiry
 	"web_push_subscription",     // 000179 (BE-177, T-409): browser subscriptions not registered again for 90 days
 	"org_logo_dropped",          // 000180 (BE-180, T-401): logos an org replaced while reported, 12 months after the change
+	"imported_event",            // 000187 (BE-210): events collected from official pages, 7 days after the event
 }
 
 // TestSchema_RetentionSeedComplete (02 §24.2, T-35): exactly the 44 policies
@@ -42,8 +43,8 @@ var retentionSeedCodes = []string{
 func TestSchema_RetentionSeedComplete(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
-	if len(retentionSeedCodes) != 55 {
-		t.Fatalf("the §24.2 list has %d codes, want 55", len(retentionSeedCodes))
+	if len(retentionSeedCodes) != 56 {
+		t.Fatalf("the §24.2 list has %d codes, want 56", len(retentionSeedCodes))
 	}
 	got := queryStrings(t, w, `SELECT code FROM retention_policies ORDER BY code`)
 	want := slices.Sorted(slices.Values(retentionSeedCodes))

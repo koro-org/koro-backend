@@ -95,8 +95,13 @@ func (o Org) Summary() OrgSummary {
 // H-60 data minimisation): kind tckn records that a valid one was given.
 // TaxIDReviewRequestedAt (BE-206, migration 000183) is the time a member's
 // new tax identifier of the active company started waiting for the platform
-// admins (nil: nothing to review); no copy of a number is kept. None of
-// these columns is personal data.
+// admins (nil: nothing to review); no copy of a number is kept.
+// TaxIDRejectedAt and TaxIDRejectionReason (BE-208, migration 000185) are a
+// platform admin's rejection of that identifier: its time and the staff's
+// reason, shown to the company's editors while the rejection's suspension
+// lasts (reactivation, a corrected identifier and closing clear them). None
+// of these columns is personal data (the staff are told not to write any in
+// the reason).
 type Company struct {
 	OrgID            uuid.UUID  `gorm:"type:uuid;column:org_id;primaryKey" json:"org_id"`
 	OrgKind          Kind       `gorm:"column:org_kind" json:"org_kind"`
@@ -110,8 +115,11 @@ type Company struct {
 	TaxOffice        *string    `gorm:"column:tax_office" json:"tax_office,omitempty"`
 	// TaxIDReviewRequestedAt: see the type's comment (BE-206).
 	TaxIDReviewRequestedAt *time.Time `gorm:"column:tax_id_review_requested_at" json:"tax_id_review_requested_at,omitempty"`
-	CreatedAt              time.Time  `gorm:"column:created_at;->" json:"created_at"`
-	UpdatedAt              time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
+	// TaxIDRejectedAt, TaxIDRejectionReason: see the type's comment (BE-208).
+	TaxIDRejectedAt      *time.Time `gorm:"column:tax_id_rejected_at" json:"tax_id_rejected_at,omitempty"`
+	TaxIDRejectionReason *string    `gorm:"column:tax_id_rejection_reason" json:"tax_id_rejection_reason,omitempty"`
+	CreatedAt            time.Time  `gorm:"column:created_at;->" json:"created_at"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;->" json:"updated_at"`
 }
 
 // TableName implements gorm's Tabler.
@@ -122,6 +130,21 @@ func (Company) TableName() string { return "companies" }
 // org of status s not closed (a closed org has nothing left to decide).
 func (c Company) TaxIDReviewPending(s Status) bool {
 	return c.TaxIDReviewRequestedAt != nil && s != StatusClosed
+}
+
+// TaxIDRejected reports whether the company of an org of status s is
+// suspended for the rejection of its new tax identifier (BE-208): the reason
+// explains the suspension, so it is shown only while the org is suspended.
+func (c Company) TaxIDRejected(s Status) bool {
+	return c.TaxIDRejectedAt != nil && c.TaxIDRejectionReason != nil && s == StatusSuspended
+}
+
+// clearTaxIDRejection drops the rejection (BE-208) and reports whether there
+// was one.
+func (c *Company) clearTaxIDRejection() bool {
+	had := c.TaxIDRejectedAt != nil || c.TaxIDRejectionReason != nil
+	c.TaxIDRejectedAt, c.TaxIDRejectionReason = nil, nil
+	return had
 }
 
 // TaxIDKind is companies.tax_id_kind: which tax identifier a company gave.

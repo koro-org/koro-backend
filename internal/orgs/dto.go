@@ -34,7 +34,7 @@ func (CompanyPublicDTO) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.S
 		return name == "tax_id_valid" || name == "domain_verified"
 	})
 	for _, name := range []string{"tax_id_kind", "tax_no", "tax_no_masked", "tax_office", "tax_id_valid", "domain_verified",
-		"tax_id_review_requested_at"} {
+		"tax_id_review_requested_at", "tax_id_rejected_at", "tax_id_rejection_reason"} {
 		if p := s.Properties[name]; p != nil {
 			cp := *p
 			cp.Description = strings.TrimSpace("Only for the company's editors. " + p.Description)
@@ -57,6 +57,10 @@ type CompanyTaxDTO struct {
 	// TaxIDReviewRequestedAt (BE-206): a member's new tax identifier waits
 	// for a platform admin since then; the company stays active meanwhile.
 	TaxIDReviewRequestedAt *time.Time `json:"tax_id_review_requested_at,omitempty" doc:"A member's new tax identifier waits for a platform admin's decision since then (the company stays active); absent when nothing waits"`
+	// TaxIDRejectedAt, TaxIDRejectionReason (BE-208, Q-63): a platform admin
+	// rejected the new tax identifier and the company is suspended for it.
+	TaxIDRejectedAt      *time.Time `json:"tax_id_rejected_at,omitempty" doc:"A platform admin rejected the company's new tax identifier then and suspended the company; only while it is suspended for it (reactivation, a corrected identifier or closing clears it)"`
+	TaxIDRejectionReason string     `json:"tax_id_rejection_reason,omitempty" doc:"The platform admin's reason for the rejection (3–500 characters), shown to the company; with tax_id_rejected_at only"`
 }
 
 // OrgPublicDTO is the public profile of an org (04 §2.2 getOrg). club and
@@ -251,6 +255,9 @@ func toTaxDTO(c Company, s Status, full bool) CompanyTaxDTO {
 	d := CompanyTaxDTO{
 		TaxIDKind: kindStr(c.TaxIDKind), TaxNo: str(c.TaxNo), TaxOffice: str(c.TaxOffice), TaxIDValid: c.TaxIDValid(),
 		DomainVerified: c.DomainVerified(), TaxIDReviewRequestedAt: taxReviewAt(c, s),
+	}
+	if c.TaxIDRejected(s) {
+		d.TaxIDRejectedAt, d.TaxIDRejectionReason = utc(c.TaxIDRejectedAt), *c.TaxIDRejectionReason
 	}
 	if d.TaxNo != "" && !full {
 		d.TaxNo, d.TaxNoMasked = taxid.Mask(d.TaxNo, taxid.MaskedDigits), true

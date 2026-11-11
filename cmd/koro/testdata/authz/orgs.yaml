@@ -308,7 +308,10 @@ operations:
     path_params: { org_id: company_tax_review }
     headers: { If-Match: '"1hmhuo3hji000"' }
     body: bodies/orgs/approve_tax_id.json
-    note: "single platform_admin (06 H-60, no four eyes for a document review); the company stays active"
+    note: >-
+      single platform_admin (06 H-60, no four eyes for a document review); the company stays active. Party rule
+      (BE-208): a platform_admin who is a member of the company is 403; no persona is both, so
+      TestTaxIDReview_PartyCannotDecide and TestOrgsPolicy_PartyDecidesNothing pin it
     expect:
       anonymous: 401
       "@no_platform_role": 403
@@ -330,7 +333,9 @@ operations:
     path_params: { org_id: company_tax_review }
     headers: { If-Match: '"1hmhuo3hji000"' }
     body: bodies/orgs/reject_tax_id.json
-    note: R; the rejection suspends the company
+    note: >-
+      R; the rejection suspends the company and keeps the reason for its editors (BE-208); the party rule as
+      adminApproveTaxIdChange
     expect:
       anonymous: 401
       "@no_platform_role": 403

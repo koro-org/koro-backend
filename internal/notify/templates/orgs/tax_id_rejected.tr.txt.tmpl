@@ -1,5 +1,7 @@
 Merhaba {{index .Data "name"}},
 
 Koro ekibi {{index .Data "org_name"}} kuruluşunun yeni vergi kimliğini inceledi, doğrulayamadı ve kuruluşu askıya aldı.
-
+{{with index .Data "reason"}}
+Gerekçe: {{.}}
+{{end}}
 Askıdayken kuruluş adına işlem yapılamaz. Doğru vergi kimliğini ve vergi levhanızı Koro destek ekibine iletin; ekip kimliği düzeltip kuruluşu yeniden etkinleştirebilir.

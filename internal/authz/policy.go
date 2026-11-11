@@ -90,6 +90,13 @@ func OrgSurfaceVisible(a Actor, orgID *uuid.UUID) bool {
 	return orgID != nil && a.MemberOf(*orgID)
 }
 
+// orgParty reports whether a has a stake in the org r names: a current
+// member of it, any role (BE-183, BE-194, BE-208). Staff never decide on an
+// org they belong to, nor on a report naming it; the rule binds platform
+// admins too. Memberships ended before are not known (the actor carries the
+// active ones).
+func orgParty(a Actor, r Resource) bool { return r.OrgID != nil && a.MemberOf(*r.OrgID) }
+
 // AdminSurfaceVisible is the visibility of /admin/** (03 §3.2, §7.2-3): the
 // surface is no secret, so every user sees it and an actor without a
 // platform role gets 403 before the service reads anything.

@@ -283,6 +283,61 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (orgs.Store, world)
 		}
 	})
 
+	t.Run("companies: tax identifier rejection and its reason (BE-208)", func(t *testing.T) {
+		t.Parallel()
+		s, _ := newStore(t)
+		ctx := t.Context()
+		at := time.Date(2026, 11, 11, 9, 15, 0, 0, time.UTC)
+		o := newOrg(orgs.KindCompany, "Reddedilen")
+		o.Status = orgs.StatusSuspended
+		o = insert(t, s, o)
+		if err := s.InsertCompany(ctx, orgs.Company{OrgID: o.ID}); err != nil {
+			t.Fatal(err)
+		}
+		c, err := s.GetCompany(ctx, o.ID)
+		if err != nil || c.TaxIDRejectedAt != nil || c.TaxIDRejectionReason != nil || c.TaxIDRejected(o.Status) {
+			t.Fatalf("a new company = %+v, %v", c, err)
+		}
+		reason := "VKN şirket unvanıyla eşleşmiyor"
+		c.TaxIDRejectedAt, c.TaxIDRejectionReason = &at, &reason
+		got, err := s.UpdateCompany(ctx, c)
+		if err != nil || got.TaxIDRejectedAt == nil || !got.TaxIDRejectedAt.Equal(at) || got.TaxIDRejectionReason == nil ||
+			*got.TaxIDRejectionReason != reason || !got.TaxIDRejected(o.Status) || got.TaxIDRejected(orgs.StatusActive) {
+			t.Fatalf("rejected = %+v, %v", got, err)
+		}
+		// The CHECKs: 3–500 characters, both or neither, never with a pending review.
+		for name, mut := range map[string]func(c *orgs.Company){
+			"short reason":      func(c *orgs.Company) { c.TaxIDRejectionReason = new("ab") },
+			"long reason":       func(c *orgs.Company) { c.TaxIDRejectionReason = new(strings.Repeat("ğ", 501)) },
+			"reason, no time":   func(c *orgs.Company) { c.TaxIDRejectedAt = nil },
+			"time, no reason":   func(c *orgs.Company) { c.TaxIDRejectionReason = nil },
+			"review and reject": func(c *orgs.Company) { c.TaxIDReviewRequestedAt = &at },
+		} {
+			bad := got
+			mut(&bad)
+			if _, err := s.UpdateCompany(ctx, bad); !errors.Is(err, problem.ErrValidation) {
+				t.Errorf("%s: %v, want a CHECK violation", name, err)
+			}
+		}
+		long := got
+		long.TaxIDRejectionReason = new(strings.Repeat("ğ", 500))
+		if _, err := s.UpdateCompany(ctx, long); err != nil {
+			t.Fatalf("a 500 character reason: %v", err)
+		}
+		got.TaxIDRejectedAt, got.TaxIDRejectionReason = nil, nil
+		if cleared, err := s.UpdateCompany(ctx, got); err != nil || cleared.TaxIDRejectedAt != nil || cleared.TaxIDRejectionReason != nil {
+			t.Fatalf("cleared = %+v, %v", cleared, err)
+		}
+		// InsertCompany writes the columns too (a profile restored as it was).
+		o2 := insert(t, s, newOrg(orgs.KindCompany, "Reddedilen İki"))
+		if err := s.InsertCompany(ctx, orgs.Company{OrgID: o2.ID, TaxIDRejectedAt: &at, TaxIDRejectionReason: &reason}); err != nil {
+			t.Fatal(err)
+		}
+		if c2, err := s.GetCompany(ctx, o2.ID); err != nil || c2.TaxIDRejectionReason == nil || *c2.TaxIDRejectionReason != reason {
+			t.Fatalf("inserted = %+v, %v", c2, err)
+		}
+	})
+
 	t.Run("members: parent kind, uniqueness, end", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

@@ -308,8 +308,9 @@ func TestAdminListOrgs_TaxIDReviewFilter(t *testing.T) {
 // every platform admin in-app, once per review, linking the admin list of
 // the tax identifier reviews, unless the review was decided before the task
 // ran. An approval tells the company's active admins (not a recruiter)
-// in-app; a rejection tells them in-app and by e-mail, never with the staff's
-// reason, unless the company was reactivated meanwhile.
+// in-app; a rejection tells them in-app and by e-mail, the e-mail with the
+// staff's reason read from the company (BE-208; never in the in-app data),
+// unless the company was reactivated meanwhile.
 func TestTaxIDReview_Notices(t *testing.T) {
 	t.Parallel()
 	a1, a2 := uuid.NewV7(), uuid.NewV7()
@@ -365,22 +366,24 @@ func TestTaxIDReview_Notices(t *testing.T) {
 		t.Fatalf("%d notices for a decided review", n)
 	}
 
-	// The rejection: in-app and e-mail to the company's admins, no reason.
+	// The rejection: in-app and e-mail to the company's admins; the e-mail
+	// carries the reason (BE-208), the in-app data never does.
 	e3 := reviewEnv(t)
 	v3, owner3, _ := e3.flaggedCompany(t, "Reddedilen Şirket")
 	e3.users.add(owner3.UserID, "sahip@reddedilen.example.test", false)
-	const reason = "Gizli personel gerekçesi"
+	const reason = "VKN vergi levhasıyla eşleşmiyor"
 	if _, err := e3.svc.AdminRejectTaxIDChange(ctx, pad(t), v3.Org.ID, e3.adminETag(t, v3.Org.ID), reason, proof(goodPassword)); err != nil {
 		t.Fatal(err)
 	}
 	e3.deliver(t, domainevent.TopicOrgReviewDecided)
 	inApp, mails := e3.sentOf("orgs.tax_id_rejected", notify.ChannelInApp), e3.sentOf("orgs.tax_id_rejected", notify.ChannelEmail)
 	if len(inApp) != 1 || len(mails) != 1 || *mails[0].UserID != owner3.UserID || mails[0].ToEmail != "sahip@reddedilen.example.test" ||
-		mails[0].Data["org_name"] != "Reddedilen Şirket" || inApp[0].LinkPath != notify.OrgLink(v3.Org.ID) {
+		mails[0].Data["org_name"] != "Reddedilen Şirket" || mails[0].Data["reason"] != reason ||
+		inApp[0].LinkPath != notify.OrgLink(v3.Org.ID) {
 		t.Fatalf("rejection notices in-app %+v, e-mail %+v", inApp, mails)
 	}
-	if strings.Contains(fmt.Sprint(mails[0].Data, inApp[0].Data), reason) {
-		t.Fatal("the staff's reason reached the company")
+	if strings.Contains(fmt.Sprint(inApp[0].Data), reason) {
+		t.Fatal("the staff's reason reached the in-app data")
 	}
 
 	// Reactivated before the task ran: the rejection notice would be wrong.

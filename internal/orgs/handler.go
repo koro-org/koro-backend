@@ -66,7 +66,8 @@ func Register(api huma.API, svc Service) {
 			"identifier on file of a company past its review needs re-authentication (reauth; 403 " +
 			"identity.reauth_required, identity.reauth_failed). When a member does it, the active company stays active " +
 			"and the change waits for a platform admin (company.tax_id_review_requested_at; adminApproveTaxIdChange, " +
-			"adminRejectTaxIdChange). The other changes need no proof.",
+			"adminRejectTaxIdChange). Another identifier clears a rejection's company.tax_id_rejection_reason. The other " +
+			"changes need no proof.",
 	}, op.Meta{Action: string(authz.OrgsOrgUpdate), Surface: op.SurfaceOrg, Reauth: true}, h.updateOrg)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -105,7 +106,9 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminReactivateOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/reactivate",
-		Summary: "Reactivate a suspended organization", Description: "suspended → active, with re-authentication.",
+		Summary: "Reactivate a suspended organization",
+		Description: "suspended → active, with re-authentication. A company's tax identifier rejection " +
+			"(company.tax_id_rejection_reason) ends with the suspension.",
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminReactivate)
 
@@ -114,22 +117,28 @@ func Register(api huma.API, svc Service) {
 		Summary: "Approve a company's new tax identifier",
 		Description: "The company's pending tax identifier review ends; its status and verification stay. If-Match with " +
 			"the ETag of getOrg is required (missing → 428; stale → 412: the identifier changed since it was read). No " +
-			"pending review (or a closed org) → 409 orgs.invalid_state. The company's admins are told in-app.",
+			"pending review (or a closed org) → 409 orgs.invalid_state. The company's admins are told in-app. " + taxIDParty,
 	}, op.Meta{Action: string(authz.OrgsOrgVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional},
 		h.adminApproveTaxID)
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminRejectTaxIdChange", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/tax-id-change/reject",
 		Summary: "Reject a company's new tax identifier",
-		Description: "With re-authentication and a reason (audited, not shown to the company). The pending review ends " +
-			"and an active company is suspended (a suspended one stays so); the company's admins are told in-app and by " +
-			"e-mail. A platform admin can then correct the identifier (updateOrg) and reactivate it. If-Match with the " +
-			"ETag of getOrg is required (428/412). No pending review (or a closed org) → 409 orgs.invalid_state.",
+		Description: "With re-authentication and a reason. The reason is shown to the company: its editors read it on " +
+			"the org (company.tax_id_rejection_reason, never on the public profile) and in the rejection e-mail; write no " +
+			"personal data in it. The pending review ends and an active company is suspended (a suspended one stays so); " +
+			"the company's admins are told in-app and by e-mail. A platform admin can then correct the identifier " +
+			"(updateOrg) and reactivate it; either clears the reason. If-Match with the ETag of getOrg is required " +
+			"(428/412). No pending review (or a closed org) → 409 orgs.invalid_state. " + taxIDParty,
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminRejectTaxID)
 
 	registerMembers(api, h)
 }
+
+// taxIDParty is the party rule of the tax identifier decisions (BE-208).
+const taxIDParty = "A platform admin who is a member of the company (any role) is a party: 403 forbidden, checked " +
+	"before the review, If-Match and the proof (another platform admin decides)."
 
 type handler struct{ svc Service }
 
@@ -527,7 +536,7 @@ type taxIDRejectInput struct {
 	OrgPath
 	IfMatch string `header:"If-Match" doc:"ETag of getOrg (required: missing → 428, stale → 412)"`
 	Body    struct {
-		Reason string             `json:"reason" minLength:"3" maxLength:"500" doc:"Why the identifier is rejected (audited; not shown to the company)"`
+		Reason string             `json:"reason" minLength:"3" maxLength:"500" doc:"Why the identifier is rejected (audited and shown to the company's editors and in its e-mail; no personal data)"`
 		Reauth *consent.ReauthDTO `json:"reauth,omitempty" doc:"Re-authentication proof (03 §6.2)"`
 	}
 }

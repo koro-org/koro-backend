@@ -1,4 +1,7 @@
-version: 1
+version: 2
 category: transactional
+# BE-208 (Q-63): the e-mail carries the platform admin's reason (read from the
+# company when the task runs, never from the event); the in-app text is fixed
+# and points to the panel, which shows the reason to the company's editors.
 preference: security
 channels: [email, in_app]

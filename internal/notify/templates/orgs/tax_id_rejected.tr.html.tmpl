@@ -1,3 +1,4 @@
 <p style="margin:0 0 12px 0;">Merhaba {{index .Data "name"}},</p>
 <p style="margin:0 0 12px 0;">Koro ekibi {{index .Data "org_name"}} kuruluşunun yeni vergi kimliğini inceledi, doğrulayamadı ve kuruluşu askıya aldı.</p>
-<p style="margin:0;">Askıdayken kuruluş adına işlem yapılamaz. Doğru vergi kimliğini ve vergi levhanızı Koro destek ekibine iletin; ekip kimliği düzeltip kuruluşu yeniden etkinleştirebilir.</p>
+{{with index .Data "reason"}}<p style="margin:0 0 12px 0;">Gerekçe: {{.}}</p>
+{{end}}<p style="margin:0;">Askıdayken kuruluş adına işlem yapılamaz. Doğru vergi kimliğini ve vergi levhanızı Koro destek ekibine iletin; ekip kimliği düzeltip kuruluşu yeniden etkinleştirebilir.</p>

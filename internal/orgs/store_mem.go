@@ -253,6 +253,7 @@ func (s *MemStore) InsertCompany(_ context.Context, c Company) error {
 	now := s.stamp(time.Time{})
 	c.CreatedAt, c.UpdatedAt = now, now
 	c.DomainVerifiedAt, c.TaxIDReviewRequestedAt = db.UTCPtr(c.DomainVerifiedAt), db.UTCPtr(c.TaxIDReviewRequestedAt)
+	c.TaxIDRejectedAt = db.UTCPtr(c.TaxIDRejectedAt)
 	s.companies[c.OrgID] = c
 	return nil
 }
@@ -291,6 +292,14 @@ func checkCompany(c Company) error {
 	case c.TaxOffice != nil && (*c.TaxOffice == "" || strings.TrimSpace(*c.TaxOffice) != *c.TaxOffice ||
 		utf8.RuneCountInString(*c.TaxOffice) > taxid.MaxTaxOffice): // companies_tax_office_chk
 		return errCheck
+	case c.TaxIDRejectionReason != nil && (runes(c.TaxIDRejectionReason) < 3 || runes(c.TaxIDRejectionReason) > 500):
+		return errCheck // companies_tax_id_rejection_reason_chk
+	case c.TaxIDRejectionReason != nil && c.TaxIDRejectedAt == nil: // companies_tax_id_rejection_reason_at_chk
+		return errCheck
+	case c.TaxIDRejectedAt != nil && c.TaxIDRejectionReason == nil: // companies_tax_id_rejected_at_reason_chk
+		return errCheck
+	case c.TaxIDRejectedAt != nil && c.TaxIDReviewRequestedAt != nil: // companies_tax_id_rejection_review_chk
+		return errCheck
 	}
 	return nil
 }
@@ -326,6 +335,7 @@ func (s *MemStore) UpdateCompany(_ context.Context, c Company) (Company, error) 
 	cur.SectorCode, cur.SizeBand, cur.EmailDomain, cur.HQCity = c.SectorCode, c.SizeBand, c.EmailDomain, c.HQCity
 	cur.DomainVerifiedAt, cur.TaxIDKind, cur.TaxNo, cur.TaxOffice = db.UTCPtr(c.DomainVerifiedAt), c.TaxIDKind, c.TaxNo, c.TaxOffice
 	cur.TaxIDReviewRequestedAt = db.UTCPtr(c.TaxIDReviewRequestedAt)
+	cur.TaxIDRejectedAt, cur.TaxIDRejectionReason = db.UTCPtr(c.TaxIDRejectedAt), c.TaxIDRejectionReason
 	if err := checkCompany(cur); err != nil {
 		return Company{}, err
 	}

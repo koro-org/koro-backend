@@ -34,7 +34,8 @@ func (s *service) AdminSuspendOrg(ctx context.Context, a authz.Actor, id uuid.UU
 	return s.adminR(ctx, a, id, reason, proof, transition{op: "suspend", from: StatusActive, to: StatusSuspended})
 }
 
-// AdminReactivateOrg implements Service (R): suspended → active.
+// AdminReactivateOrg implements Service (R): suspended → active; a company's
+// tax identifier rejection ends with the suspension (BE-208).
 func (s *service) AdminReactivateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof reauthProof) (OrgView, error) {
 	return s.adminR(ctx, a, id, reason, proof, transition{op: "reactivate", from: StatusSuspended, to: StatusActive})
 }
@@ -94,6 +95,11 @@ func (s *service) transition(ctx context.Context, a authz.Actor, id uuid.UUID, t
 		}
 		if err := s.emitOrgUpdated(ctx, o, []string{"status"}); err != nil {
 			return uuid.Nil(), err
+		}
+		if t.from == StatusSuspended { // the suspension a tax identifier rejection explained ends (BE-208)
+			if err := s.endTaxIDRejection(ctx, o); err != nil {
+				return uuid.Nil(), err
+			}
 		}
 		if t.from == StatusPendingReview && t.to == StatusActive {
 			if err := s.emitReviewDecided(ctx, o, domainevent.OrgReviewVerified); err != nil {

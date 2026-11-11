@@ -1,6 +1,7 @@
 package authz_test
 
 import (
+	"slices"
 	"strconv"
 	"testing"
 	"uuid"
@@ -78,6 +79,10 @@ func TestOrgsPolicy_Matrix(t *testing.T) {
 			map[string]error{"moderator": nil, "support": nil, "platform_admin": nil}, fb},
 		{"verify", authz.OrgsOrgVerify, adminSurface, map[string]error{"platform_admin": nil}, fb},
 		{"suspend", authz.OrgsOrgSuspend, adminSurface, map[string]error{"platform_admin": nil}, fb},
+		{"verify company_a (the org decided on)", authz.OrgsOrgVerify, orgRes("company_a", authz.OrgCompany, "active"),
+			map[string]error{"platform_admin": nil}, fb},
+		{"suspend company_a (the org decided on)", authz.OrgsOrgSuspend, orgRes("company_a", authz.OrgCompany, "suspended"),
+			map[string]error{"platform_admin": nil}, fb},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -92,6 +97,39 @@ func TestOrgsPolicy_Matrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestOrgsPolicy_PartyDecidesNothing (BE-208, Q-63): on the org decided on,
+// a platform admin who is a member of it (any role) gets no grant for
+// orgs.org.verify and orgs.org.suspend (403); a membership elsewhere changes
+// nothing, nor does the admin surface (it names no org). BE-183/BE-194's
+// rule for the moderators is the same helper (feed.org.moderate).
+func TestOrgsPolicy_PartyDecidesNothing(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	co, other := authztest.ID("company_a"), authztest.ID("company_b")
+	join := func(a authz.Actor, org uuid.UUID, role authz.MemberRole) authz.Actor {
+		a.Memberships = append(slices.Clone(a.Memberships), authz.Membership{OrgID: org, OrgKind: authz.OrgCompany, Role: role})
+		return a
+	}
+	pad := persona(t, "platform_admin")
+	for _, act := range []authz.Action{authz.OrgsOrgVerify, authz.OrgsOrgSuspend} {
+		for _, status := range []string{"active", "suspended"} {
+			r := orgRes("company_a", authz.OrgCompany, status)
+			wantErr(t, authz.Can(ctx, pad, act, r), nil, false)
+			for _, role := range []authz.MemberRole{authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner} {
+				wantErr(t, authz.Can(ctx, join(pad, co, role), act, r), authz.ErrForbidden, false)
+				wantErr(t, authz.Can(ctx, join(pad, co, role), act, adminSurface), nil, false)
+				wantErr(t, authz.Can(ctx, join(pad, other, role), act, r), nil, false)
+			}
+		}
+	}
+	// The moderators' rule is the same: a member moderates no org of theirs.
+	mod := persona(t, "moderator")
+	moderated := orgRes("company_a", authz.OrgCompany, "active")
+	moderated.Attrs["moderation_action"], moderated.Attrs["trust_level"] = "warn_org", "new"
+	wantErr(t, authz.Can(ctx, mod, authz.FeedOrgModerate, moderated), nil, false)
+	wantErr(t, authz.Can(ctx, join(mod, co, authz.MemberRecruiter), authz.FeedOrgModerate, moderated), authz.ErrForbidden, false)
 }
 
 func TestOrgsPolicy_EdgeCases(t *testing.T) {

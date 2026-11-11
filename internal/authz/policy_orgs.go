@@ -18,8 +18,9 @@ const TypeOrgCatalog = "org_catalog"
 //	orgs.org.close           S·k-own: the org's company_owner; platform_admin (R in the service)
 //	orgs.ownership.transfer  S·k-own: the org's company_owner; platform_admin (R in the service)
 //	orgs.org.list_admin      moderator, support, platform_admin (admin surface)
-//	orgs.org.verify          platform_admin (admin surface)
-//	orgs.org.suspend         platform_admin (admin surface; R in the service)
+//	orgs.org.verify          platform_admin (admin surface; on a decided org: not a member of it)
+//	orgs.org.suspend         platform_admin (admin surface; R in the service; on a decided org: not a
+//	                           member of it)
 //
 // Resources (03 §3.5): org (OrgID = the org itself; Attrs org_kind,
 // org_status), org_catalog (search), admin_surface (the /admin operations:
@@ -27,6 +28,13 @@ const TypeOrgCatalog = "org_catalog"
 // updateOrg, closeOrg and transferOrgOwnership are the org's management
 // surface (03 §3.6, §7.6): visible to its active members (403 without the
 // role) and to every platform role; anyone else gets 404.
+//
+// The party rule (BE-208, Q-63; BE-183/BE-194's for the moderators): the
+// decision on a company's new tax identifier authorises twice, first the
+// admin surface (403 before anything is read), then the org decided on (an
+// org resource): a platform admin who is a member of the org, any role, gets
+// no grant (403). Only the tax identifier review asks the second question
+// today (adminApproveTaxIdChange, adminRejectTaxIdChange).
 //
 // k-cmp (BE-017 reading of 03 §5.2 orgs.company.create): the usr column is
 // an account with no student verification and no platform role (platform
@@ -81,8 +89,10 @@ func orgsPolicy() Policy {
 				return r.Type == TypeOrg && r.Attr("org_kind") == string(OrgCompany)
 			case OrgsOrgUpdate, OrgsOrgClose, OrgsOwnershipTransfer:
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
-			case OrgsOrgListAdmin, OrgsOrgVerify, OrgsOrgSuspend:
+			case OrgsOrgListAdmin:
 				return r.Type == TypeAdminSurface && AdminSurfaceVisible(a)
+			case OrgsOrgVerify, OrgsOrgSuspend: // the surface, then the org decided on (BE-208)
+				return (r.Type == TypeAdminSurface || r.Type == TypeOrg) && AdminSurfaceVisible(a)
 			case OrgsMemberList:
 				if r.Type != TypeOrg {
 					return false
@@ -140,6 +150,9 @@ func orgsPolicy() Policy {
 			case OrgsOrgListAdmin:
 				return []Grant{{Role: RoleModerator}, {Role: RoleSupport}, pad}
 			case OrgsOrgVerify, OrgsOrgSuspend:
+				if r.Type == TypeOrg && orgParty(a, r) {
+					return nil // nobody decides on an org they belong to (BE-208)
+				}
 				return []Grant{pad}
 			case OrgsMemberList, OrgsMemberRead:
 				return orgsMemberReadGrants(a, r)

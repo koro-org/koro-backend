@@ -210,11 +210,19 @@ func (s *service) taxChange(ctx context.Context, o Org, p OrgPatch) (bool, error
 		return false, nil
 	case err != nil:
 		return false, err
-	case c.TaxIDKind == nil:
-		return false, nil
 	}
-	same := *tax.kind == TaxIDVKN && *c.TaxIDKind == TaxIDVKN && equalPtr(c.TaxNo, tax.no)
-	return !same, nil
+	return tax.replaces(c), nil
+}
+
+// replaces reports whether t, a given identifier, replaces the one on file
+// of c with another: c holds one and t is not the same VKN (a TCKN is not
+// stored, so a TCKN over a TCKN counts as another).
+func (t taxIdentity) replaces(c Company) bool {
+	if t.kind == nil || c.TaxIDKind == nil {
+		return false
+	}
+	same := *t.kind == TaxIDVKN && *c.TaxIDKind == TaxIDVKN && equalPtr(c.TaxNo, t.no)
+	return !same
 }
 
 // dropLogo ends the logo o named and next no longer does: it goes with its
@@ -309,7 +317,8 @@ func (p OrgPatch) keepsTaxIdentity() error {
 // account address is at the domain verifies it (BE-165: a platform
 // admin's own address never does). review flags the new tax identifier for
 // the platform admins (BE-206) unless a review is pending already; requested
-// reports that this write flagged it.
+// reports that this write flagged it. Another identifier ends a rejection of
+// the previous one (BE-208: its reason no longer applies).
 func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgPatch, review bool) (changed []string,
 	requested bool, err error) {
 	c, err := s.companies().GetCompany(ctx, o.ID)
@@ -364,6 +373,9 @@ func (s *service) patchCompany(ctx context.Context, a authz.Actor, o Org, p OrgP
 		c.HQCity, changed = cf.hq, append(changed, "hq_city")
 	}
 	if p.taxID() {
+		if cf.tax.replaces(c) {
+			c.clearTaxIDRejection()
+		}
 		c.TaxIDKind, c.TaxNo, changed = cf.tax.kind, cf.tax.no, append(changed, "tax_id")
 	}
 	if review && c.TaxIDReviewRequestedAt == nil {
@@ -492,6 +504,9 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 			if err := s.emitReviewDecided(ctx, o, domainevent.OrgReviewRejected); err != nil {
 				return uuid.Nil(), err
 			}
+		}
+		if err := s.endTaxIDRejection(ctx, o); err != nil { // nobody reads it any more (BE-208)
+			return uuid.Nil(), err
 		}
 		gone, err := s.members().EndOpenMembers(ctx, o.ID, now, EndOrgClosed)
 		if err != nil {

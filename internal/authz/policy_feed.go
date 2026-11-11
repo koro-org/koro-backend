@@ -208,8 +208,7 @@ func reportInterested(a Actor, r Resource) bool {
 	if r.Type != TypeContentReport {
 		return false
 	}
-	return a.Owns(r) || r.OrgID != nil && a.MemberOf(*r.OrgID) ||
-		a.IsUser() && r.Attr(AttrReportParty) == a.UserID.String()
+	return a.Owns(r) || orgParty(a, r) || a.IsUser() && r.Attr(AttrReportParty) == a.UserID.String()
 }
 
 // orgModerationGrants is feed.org.moderate on the admin surface or on the
@@ -220,7 +219,7 @@ func orgModerationGrants(a Actor, r Resource) []Grant {
 	if r.Type != TypeOrg {
 		return moderators
 	}
-	if r.OrgID != nil && a.MemberOf(*r.OrgID) {
+	if orgParty(a, r) {
 		return nil
 	}
 	if r.Attr("moderation_action") == "suspend_org" || r.Attr("trust_level") == "suspended" &&

@@ -88,9 +88,11 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 		environ[k] = v
 	}
 
-	// --- data: reference + synthetic demo; a synthetic .edu.tr domain for
-	// the main university (reference data, as `koro seed reference` writes
-	// it; no real address is ever used) ---
+	// --- data: reference + synthetic demo; a synthetic .edu.tr student
+	// domain for the main university (reference data, as `koro seed
+	// reference` writes it; no real address is ever used). The student
+	// subdomain is a row of its own (BE-228: a subdomain is not covered by
+	// its parent) ---
 	seedCmd(t, environ, "reference")
 	seedCmd(t, environ, "demo", "-password", demoPassword)
 	var mainUni, mainClub, company, segment uuid.UUID
@@ -106,7 +108,7 @@ func TestSmoke_ClubFirstPilotFlow(t *testing.T) {
 	q(`SELECT m.org_id FROM users us JOIN org_members m ON m.user_id = us.id AND m.role = 'company_owner' WHERE us.email = $1`,
 		&company, seed.CompanyEmail)
 	q(`SELECT s.id FROM segments s WHERE s.org_id = $1 AND s.audience_keys = ARRAY['uni:' || $2::text]`, &segment, company, mainUni.String())
-	if _, err := d.Pool.Exec(ctx, `INSERT INTO university_email_domains (domain, university_id, domain_kind) VALUES ('example.edu.tr', $1, 'student')`,
+	if _, err := d.Pool.Exec(ctx, `INSERT INTO university_email_domains (domain, university_id, domain_kind) VALUES ('ogr.example.edu.tr', $1, 'student')`,
 		mainUni); err != nil {
 		t.Fatal(err)
 	}

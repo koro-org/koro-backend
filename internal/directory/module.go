@@ -78,10 +78,18 @@ type Catalog interface {
 	// UniversityNames names the universities (any is_active) among ids, each
 	// read once; an unknown ID has no key (identity.UniversityNames, T-223).
 	UniversityNames(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
-	// UniversityByEmailDomain maps an e-mail domain to its university: the
-	// domain equals a registered one or ends with "." + it; the longest
-	// active match of an active university wins (02 §8.2).
+	// UniversityByEmailDomain maps an e-mail domain to the university that
+	// owns it (ingest: a club's address is the university's own): the
+	// domain equals a registered one of any kind or ends with "." + it; the
+	// longest active match of an active university wins (02 §8.2). It is
+	// not a student proof: StudentUniversityByEmailDomain is.
 	UniversityByEmailDomain(ctx context.Context, domain string) (uuid.UUID, bool, error)
+	// StudentUniversityByEmailDomain maps the domain of an address to the
+	// university whose student the address proves (identity's student
+	// verification, hooks.domainResolver; BE-228): the domain is itself an
+	// active student or mixed row of an active university. Subdomains are
+	// not covered and staff or alumni rows prove nothing.
+	StudentUniversityByEmailDomain(ctx context.Context, domain string) (uuid.UUID, bool, error)
 	// GetDepartment returns a department or ErrNotFound.
 	GetDepartment(ctx context.Context, id uuid.UUID) (Department, error)
 	// SkillsExist returns ErrUnknownSkill unless every id is an active skill.

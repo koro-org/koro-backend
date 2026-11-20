@@ -7,16 +7,26 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-// University e-mail domains (02 §8.2; BE-220).
+// University e-mail domains (02 §8.2; BE-220, BE-228).
 //
 // university_email_domains is the allow-list of student verification: an
-// address proves a student of a university only when its domain is one of
-// that university's active rows, or a dot-suffix of the address domain
-// (UniversityByEmailDomain). Rows come from two reviewed sources only:
-// the reference CSV (`koro seed reference`, changed by a pull request) and
-// adminPutUniversityEmailDomain (platform admin, MFA, audited). Nothing is
-// accepted because of its shape: a .edu.tr name proves nothing by itself
-// either, the row does.
+// address proves a student of a university only when its domain IS one of
+// that university's active rows and the row's kind admits students
+// (student or mixed; StudentUniversityByEmailDomain). A subdomain is not
+// covered by its parent: universities hand out alumni, retired staff and
+// guest mailboxes under subdomains of their student domain
+// (alumni.metu.edu.tr, alumni.bogazici.edu.tr, alumni.sabanciuniv.edu), so
+// a student subdomain is a row of its own (std.bogazici.edu.tr) and an
+// unlisted one proves nothing (fail closed). Staff and alumni rows never
+// prove a student; they record the university's other mail domains.
+// Ownership is a separate question (UniversityByEmailDomain: is this
+// address the university's at all, e.g. a club's address; a dot-suffix
+// match of any kind).
+//
+// Rows come from two reviewed sources only: the reference CSV (`koro seed
+// reference`, changed by a pull request) and adminPutUniversityEmailDomain
+// (platform admin, MFA, audited). Nothing is accepted because of its shape:
+// a .edu.tr name proves nothing by itself either, the row does.
 //
 // Most Turkish universities mail their students under .edu.tr (the
 // registry hands those names to higher-education institutions only), but
@@ -49,6 +59,40 @@ var sharedMailDomains = map[string]bool{
 	"protonmail.com": true, "qq.com": true, "windowslive.com": true, "ya.ru": true, "yahoo.com": true,
 	"yahoo.com.tr": true, "yandex.com": true, "yandex.com.tr": true, "yandex.ru": true, "ymail.com": true,
 	"zoho.com": true,
+}
+
+// nonStudentLabels are subdomain labels universities use for mailboxes of
+// people who are not (or no longer) students: graduates and retired staff.
+// A student or mixed row whose subdomain carries one is refused
+// (domainKindRule): it is the alumni or staff kind. Not exhaustive either.
+var nonStudentLabels = map[string]bool{
+	"alum": true, "alumni": true, "emekli": true, "mezun": true, "mezunlar": true, "retired": true,
+}
+
+// kindMessage is the field message of a domain_kind outside the vocabulary.
+const kindMessage = "must be one of student, staff, mixed, alumni"
+
+// domainKindRule returns why kind k cannot be stored for domain d
+// (normalized, domainRule passed), "" when it can: k is in the vocabulary
+// and a domain whose subdomain labels name graduates or retired staff
+// (alumni.metu.edu.tr, mezun.x.edu.tr) never proves a student.
+func domainKindRule(d string, k DomainKind) string {
+	if !k.Valid() {
+		return kindMessage
+	}
+	if !k.ProvesStudent() {
+		return ""
+	}
+	site, err := publicsuffix.EffectiveTLDPlusOne(d)
+	if err != nil || site == d {
+		return ""
+	}
+	for label := range strings.SplitSeq(strings.TrimSuffix(d, "."+site), ".") {
+		if nonStudentLabels[label] {
+			return "a domain of graduates or retired staff never proves a student: use alumni or staff"
+		}
+	}
+	return ""
 }
 
 // isEduTR reports whether d (normalized) is under .edu.tr.

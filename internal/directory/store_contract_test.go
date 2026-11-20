@@ -286,6 +286,30 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		}
 	})
 
+	t.Run("alumni kind (BE-228)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		a := uni(t, s, w, "Mezun Üniversitesi", "Ankara")
+		d, err := s.InsertDomain(ctx, directory.EmailDomain{Domain: "alumni.mezununi.edu.tr", UniversityID: a.ID,
+			DomainKind: directory.DomainAlumni, IsActive: true})
+		if err != nil || d.DomainKind != directory.DomainAlumni {
+			t.Fatalf("InsertDomain(alumni) = %+v, %v", d, err)
+		}
+		if m, err := s.MatchDomain(ctx, []string{"alumni.mezununi.edu.tr"}); err != nil || m.DomainKind != directory.DomainAlumni {
+			t.Fatalf("MatchDomain = %+v, %v", m, err)
+		}
+		d.DomainKind = directory.DomainStaff
+		if g, err := s.UpdateDomain(ctx, d); err != nil || g.DomainKind != directory.DomainStaff {
+			t.Fatalf("UpdateDomain(staff) = %+v, %v", g, err)
+		}
+		// The kind CHECK (000191) still refuses a value outside the vocabulary.
+		d.DomainKind = "faculty"
+		if _, err := s.UpdateDomain(ctx, d); !isStatus(err, 422) {
+			t.Fatalf("UpdateDomain(faculty) = %v", err)
+		}
+	})
+
 	t.Run("faculties and departments", func(t *testing.T) {
 		t.Parallel()
 		s, w := newStore(t)

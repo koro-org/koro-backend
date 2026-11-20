@@ -36,7 +36,8 @@ import (
 //
 // Provided, all set in build: svc (directory.Catalog for later layers), the
 // directory KVKK provider (club claims and their evidence),
-// hooks.domainResolver (identity .edu.tr resolution, BE-018),
+// hooks.domainResolver (identity's student e-mail resolution, BE-018:
+// StudentUniversityByEmailDomain, exact student or mixed rows; BE-228),
 // hooks.clubInfo (orgs joinClub, BE-019), c.orgs.universityOrgs
 // (searchOrgs?university_id, T-180) and c.identity.universityNames (the
 // university of student verification answers, T-223).
@@ -111,7 +112,7 @@ func (w *directoryWiring) build(c *container) error {
 	c.privacy = append(c.privacy, mod.Privacy)
 	c.sweepers = append(c.sweepers, mod.Sweeper)
 	svc := mod.Service
-	c.hooks.domainResolver = svc.UniversityByEmailDomain
+	c.hooks.domainResolver = svc.StudentUniversityByEmailDomain
 	c.hooks.clubInfo = func(ctx context.Context, clubOrgID uuid.UUID) (hookClub, bool, error) {
 		club, err := svc.GetClub(ctx, clubOrgID)
 		switch {

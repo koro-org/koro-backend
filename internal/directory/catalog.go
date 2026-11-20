@@ -65,21 +65,47 @@ func (s *service) UniversityNames(ctx context.Context, ids []uuid.UUID) (map[uui
 	return out, nil
 }
 
-// UniversityByEmailDomain implements Catalog. The domain is a machine
-// identifier: it is lower-cased without Turkish rules (05 §9.5).
+// UniversityByEmailDomain implements Catalog: ownership, the domain or a
+// dot-suffix of it, any kind. The domain is a machine identifier: it is
+// lower-cased without Turkish rules (05 §9.5).
 func (s *service) UniversityByEmailDomain(ctx context.Context, domain string) (uuid.UUID, bool, error) {
 	d := normalizeDomain(domain)
-	if d == "" || len(d) > 253 {
+	if d == "" || len(d) > maxDomainLen {
 		return uuid.Nil(), false, nil
 	}
-	m, err := s.d.Store.MatchDomain(ctx, domainCandidates(d))
-	switch {
-	case errors.Is(err, ErrNotFound):
-		return uuid.Nil(), false, nil
-	case err != nil:
+	m, found, err := s.matchDomain(ctx, domainCandidates(d))
+	if !found || err != nil {
 		return uuid.Nil(), false, err
 	}
 	return m.UniversityID, true, nil
+}
+
+// StudentUniversityByEmailDomain implements Catalog (BE-228, domain.go):
+// the domain itself is an active student or mixed row of an active
+// university. A subdomain of a listed domain (alumni.metu.edu.tr under
+// metu.edu.tr) and a staff or alumni row prove nothing.
+func (s *service) StudentUniversityByEmailDomain(ctx context.Context, domain string) (uuid.UUID, bool, error) {
+	d := normalizeDomain(domain)
+	if d == "" || len(d) > maxDomainLen {
+		return uuid.Nil(), false, nil
+	}
+	m, found, err := s.matchDomain(ctx, []string{d})
+	if !found || err != nil || !m.DomainKind.ProvesStudent() {
+		return uuid.Nil(), false, err
+	}
+	return m.UniversityID, true, nil
+}
+
+// matchDomain is Store.MatchDomain with ErrNotFound as found=false.
+func (s *service) matchDomain(ctx context.Context, candidates []string) (EmailDomain, bool, error) {
+	m, err := s.d.Store.MatchDomain(ctx, candidates)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return EmailDomain{}, false, nil
+	case err != nil:
+		return EmailDomain{}, false, err
+	}
+	return m, true, nil
 }
 
 // GetDepartment implements Catalog.

@@ -316,8 +316,8 @@ func (s *service) importDomain(ctx context.Context, u University, r RefDomain, l
 	if msg := domainRule(d); msg != "" {
 		return false, false, problem.Field(loc+"domain", msg)
 	}
-	if !r.DomainKind.Valid() {
-		return false, false, problem.Field(loc+"domain_kind", "must be one of student, staff, mixed")
+	if msg := domainKindRule(d, r.DomainKind); msg != "" {
+		return false, false, problem.Field(loc+"domain_kind", msg)
 	}
 	cur, err := s.d.Store.GetDomain(ctx, d)
 	switch {

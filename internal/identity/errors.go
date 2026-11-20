@@ -105,9 +105,11 @@ var (
 	// ErrInvalidReason: a reason outside 5–500 characters of plain text.
 	ErrInvalidReason = problem.New(problem.Invalid, "identity.invalid_reason", "Invalid reason")
 	// ErrEduDomainUnknown: the address's domain is not one the directory
-	// lists for a university (hooks.domainResolver; nil until directory is
-	// wired; .edu.tr or, BE-220, another listed official domain). The
-	// student document path is the alternative (04 §2.1 startEduVerification).
+	// lists as a student domain of a university (hooks.domainResolver; nil
+	// until directory is wired; .edu.tr or, BE-220, another listed official
+	// domain; BE-228: exactly the listed domain, never an alumni or staff
+	// one). The student document path is the alternative (04 §2.1
+	// startEduVerification).
 	ErrEduDomainUnknown = problem.New(problem.Invalid, "identity.edu_domain_unknown",
 		"E-mail domain is not a known university; submit a student document instead")
 	// ErrEduEmailTaken: the university address verifies another account

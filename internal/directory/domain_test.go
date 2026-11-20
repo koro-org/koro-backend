@@ -20,7 +20,8 @@ import (
 // TestAdminPutUniversityEmailDomain_OutsideEduTR: a platform admin lists an
 // official domain of a university that is not under .edu.tr (Sabancı mails
 // under sabanciuniv.edu, Bilgi under bilgiedu.net); it resolves like a
-// .edu.tr domain (subdomains, longest match) and the audit marks it.
+// .edu.tr domain (ownership: subdomains, longest match; student proof:
+// exactly the domain, BE-228) and the audit marks it.
 func TestAdminPutUniversityEmailDomain_OutsideEduTR(t *testing.T) {
 	t.Parallel()
 	logs := &syncBuffer{}
@@ -43,6 +44,12 @@ func TestAdminPutUniversityEmailDomain_OutsideEduTR(t *testing.T) {
 		if _, found, err := e.svc.UniversityByEmailDomain(ctx, d); err != nil || found {
 			t.Fatalf("UniversityByEmailDomain(%s) matched (%v)", d, err)
 		}
+	}
+	if id, found, err := e.svc.StudentUniversityByEmailDomain(ctx, "sabanciuniv.edu"); err != nil || !found || id != u.ID {
+		t.Fatalf("StudentUniversityByEmailDomain(sabanciuniv.edu) = %v, %v, %v", id, found, err)
+	}
+	if _, found, err := e.svc.StudentUniversityByEmailDomain(ctx, "su.sabanciuniv.edu"); err != nil || found {
+		t.Fatalf("StudentUniversityByEmailDomain(su.sabanciuniv.edu): an unlisted subdomain proves a student (%v)", err)
 	}
 	ev := e.audit.Of(authz.DirectoryUniversityManage)
 	var marked []string

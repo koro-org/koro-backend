@@ -383,7 +383,9 @@ func (s *service) AdminUpdateUniversity(ctx context.Context, a authz.Actor, id u
 // updates its kind and status; a domain of another university is 409. A
 // domain outside .edu.tr (BE-220, domain.go) is allowed under domainRule;
 // the audit marks it (edu_tr=false) and a WARN log names the domain (not
-// personal data) so that every such addition is reviewed.
+// personal data) so that every such addition is reviewed. A graduates' or
+// retired staff's subdomain cannot be a student or mixed row
+// (domainKindRule, BE-228).
 func (s *service) AdminPutUniversityEmailDomain(ctx context.Context, a authz.Actor, universityID uuid.UUID, domain string, in DomainInput) (EmailDomain, bool, error) {
 	if err := authz.Can(ctx, a, authz.DirectoryUniversityManage, adminSurface); err != nil {
 		return EmailDomain{}, false, err
@@ -392,8 +394,8 @@ func (s *service) AdminPutUniversityEmailDomain(ctx context.Context, a authz.Act
 	if msg := domainRule(d); msg != "" {
 		return EmailDomain{}, false, problem.Field("path.domain", msg)
 	}
-	if !in.DomainKind.Valid() {
-		return EmailDomain{}, false, problem.Field("body.domain_kind", "must be one of student, staff, mixed")
+	if msg := domainKindRule(d, in.DomainKind); msg != "" {
+		return EmailDomain{}, false, problem.Field("body.domain_kind", msg)
 	}
 	var out EmailDomain
 	created := false

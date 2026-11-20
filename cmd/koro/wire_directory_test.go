@@ -57,12 +57,16 @@ func TestWire_DirectoryFillsHooks(t *testing.T) {
 	if err != nil || res.Universities.Created != 1 {
 		t.Fatalf("import = %+v, %v", res, err)
 	}
-	uniID, found, err := c.hooks.domainResolver(ctx, "ogr.kanca.edu.tr")
+	uniID, found, err := c.hooks.domainResolver(ctx, "kanca.edu.tr")
 	if err != nil || !found {
 		t.Fatalf("domainResolver = %v, %v", found, err)
 	}
 	if _, found, _ := c.hooks.domainResolver(ctx, "example.test"); found {
 		t.Fatal("domainResolver matched an unknown domain")
+	}
+	// The student resolution (BE-228): a subdomain is not covered.
+	if _, found, _ := c.hooks.domainResolver(ctx, "ogr.kanca.edu.tr"); found {
+		t.Fatal("domainResolver matched an unlisted subdomain")
 	}
 	u, err := c.directory.svc.GetUniversity(ctx, uniID)
 	if err != nil {

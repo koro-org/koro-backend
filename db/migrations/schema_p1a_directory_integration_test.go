@@ -55,7 +55,7 @@ func TestSchema_UniversityConstraints(t *testing.T) {
 // (02 §8.2): only well-formed lower-case domains. Since 000190 (BE-220) the
 // CHECK keeps the shape only (sabanciuniv.edu, bilgiedu.net pass); which
 // domains may be stored (no public suffix, no shared mail service) is
-// directory's domainRule.
+// directory's domainRule. Since 000191 (BE-228) domain_kind admits alumni.
 func TestSchema_UniversityEmailDomainConstraints(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
@@ -68,6 +68,12 @@ func TestSchema_UniversityEmailDomainConstraints(t *testing.T) {
 	} {
 		expectOK(t, w.d.Pool, []p1aCase{{"domain " + domain, cols + `($1, $2, 'mixed', $3)`, []any{domain, uni, admin}, "", ""}})
 	}
+	// 000191 (BE-228): graduates' mailboxes have a kind of their own.
+	expectOK(t, w.d.Pool, []p1aCase{
+		{"alumni kind", cols + `('alumni.itu.edu.tr', $1, 'alumni', NULL)`, []any{uni}, "", ""},
+		{"staff kind", cols + `('personel.itu.edu.tr', $1, 'staff', NULL)`, []any{uni}, "", ""},
+		{"student kind", cols + `('std.boun.edu.tr', $1, 'student', NULL)`, []any{uni}, "", ""},
+	})
 	var bad []p1aCase
 	for _, domain := range []string{
 		"tr", "itu", "ITU.edu.tr", "itu.edu.t", "itu.edu.tr1", "itu.edu.tr.", "https://itu.edu.tr", "a b.edu.tr", ".itu.edu.tr", "itu..edu.tr",
@@ -78,6 +84,7 @@ func TestSchema_UniversityEmailDomainConstraints(t *testing.T) {
 	expectFail(t, w.d.Pool, append(bad, []p1aCase{
 		{"duplicate domain", cols + `('itu.edu.tr', $1, 'mixed', NULL)`, []any{uni}, db.CodeUniqueViolation, "university_email_domains_pkey"},
 		{"unknown domain kind", cols + `('metu.edu.tr', $1, 'faculty', NULL)`, []any{uni}, db.CodeCheckViolation, "university_email_domains_domain_kind_chk"},
+		{"kind outside the vocabulary (000191)", cols + `('metu.edu.tr', $1, 'graduate', NULL)`, []any{uni}, db.CodeCheckViolation, "university_email_domains_domain_kind_chk"},
 		{"domain of an unknown university", cols + `('metu.edu.tr', $1, 'mixed', NULL)`, []any{uuid.NewV7()}, db.CodeForeignKeyViolation, "university_email_domains_university_id_fkey"},
 		{"unknown verifier", cols + `('metu.edu.tr', $1, 'mixed', $2)`, []any{uni, uuid.NewV7()}, db.CodeForeignKeyViolation, "university_email_domains_verified_by_fkey"},
 		{"app_rw cannot delete a domain", `DELETE FROM university_email_domains WHERE domain = 'itu.edu.tr'`, nil, db.CodeInsufficientPriv, ""},

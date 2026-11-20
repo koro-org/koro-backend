@@ -1100,10 +1100,12 @@ components:
       additionalProperties: false
       properties:
         domain_kind:
+          description: Who gets mailboxes under the domain; only student and mixed prove a student
           enum:
             - student
             - staff
             - mixed
+            - alumni
           type: string
         is_active:
           type: boolean
@@ -6339,6 +6341,7 @@ components:
             - student
             - staff
             - mixed
+            - alumni
           type: string
         is_active:
           type: boolean
@@ -28051,7 +28054,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/universities/{university_id}/email-domains/{domain}:
     put:
-      description: The domain proves a student of this university (student verification, longest match). Usually a .edu.tr domain; another official domain of the university (e.g. sabanciuniv.edu) is accepted too, but never a public suffix (edu.tr, com.tr) or a shared mail service (gmail.com, outlook.com). A domain of another university is 409 directory.domain_taken.
+      description: "A student or mixed domain proves a student of this university when an address's domain is exactly this domain: subdomains are not covered, so a student subdomain (e.g. std.bogazici.edu.tr) is listed on its own. A staff or alumni domain never proves a student; it records the university's other mail domains. A subdomain of graduates or retired staff (alumni., mezun., retired.) cannot be student or mixed (422 on body.domain_kind). Usually a .edu.tr domain; another official domain of the university (e.g. sabanciuniv.edu) is accepted too, but never a public suffix (edu.tr, com.tr) or a shared mail service (gmail.com, outlook.com). A domain of another university is 409 directory.domain_taken."
       operationId: adminPutUniversityEmailDomain
       parameters:
         - description: University ID
@@ -33269,7 +33272,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/edu-verifications:
     post:
-      description: "A single-use link (valid 24 hours) goes to the address. The domain must be one the directory lists for a university (usually .edu.tr; another official domain such as sabanciuniv.edu when listed). 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
+      description: "A single-use link (valid 24 hours) goes to the address. The domain must be exactly one the directory lists as a student domain of a university (usually .edu.tr; another official domain such as sabanciuniv.edu when listed); a subdomain of it is not covered. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a student domain of a known university (unlisted, or an alumni or staff domain) is 422 identity.edu_domain_unknown: submit a student document instead. An account without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
       operationId: startEduVerification
       requestBody:
         content:

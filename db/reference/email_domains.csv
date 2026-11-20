@@ -1,14 +1,33 @@
-# Koro referans verisi — öğrenci e-posta alan adları (directory, BE-020; 02 §8.2).
-# Kaynak: üniversitelerin kamuya açık web/e-posta alan adları. Kişisel veri yok
-# (yalnız alan adı). Eşleme: adresin alan adı buradaki alan adına eşitse ya da
-# "." + alan adı ile bitiyorsa (en uzun eşleşme kazanır). Alan adı çoğunlukla
-# .edu.tr'dir; üniversitenin başka resmî alan adı da yazılabilir (ör. Sabancı
-# sabanciuniv.edu), ama kamu soneki (edu.tr) ya da ortak posta servisi
-# (gmail.com) asla (BE-220, internal/directory/domain.go).
+# Koro referans verisi — üniversite e-posta alan adları (directory, BE-020; 02 §8.2).
+# Kaynak: üniversitelerin kamuya açık bilgi işlem sayfaları ve DNS kayıtları.
+# Kişisel veri yok (yalnız alan adı).
+# Öğrenci doğrulaması (BE-228): adresin alan adı buradaki bir satıra TAM eşit
+# olmalı ve satırın türü student ya da mixed olmalı. Alt alan üst satırla
+# eşleşmez (alumni.metu.edu.tr, metu.edu.tr değildir); öğrenci alt alanı
+# kendi satırıyla yazılır (std.bogazici.edu.tr). staff ve alumni satırları
+# öğrenci yapmaz; üniversitenin öteki posta alanlarını kaydeder (ör. ingest:
+# kulüp adresi üniversitenin mi). alumni./mezun./retired. alt alanı student
+# ya da mixed olamaz. Alan adı çoğunlukla .edu.tr'dir; üniversitenin başka
+# resmî alan adı da yazılabilir (ör. Sabancı sabanciuniv.edu), ama kamu soneki
+# (edu.tr) ya da ortak posta servisi (gmail.com) asla (BE-220,
+# internal/directory/domain.go).
+# Türler (BE-228 araştırması, 2026-11-20):
+#   ODTÜ: öğrenci ve personel @metu.edu.tr (öğrenci hesabı mezuniyetten bir
+#     dönem sonra kapanır: faq.cc.metu.edu.tr); mezunlar @alumni.metu.edu.tr
+#     (mezun.metu.edu.tr/en/faq).
+#   İTÜ: akademik, idari personel ve tüm öğrenciler @itu.edu.tr
+#     (bidb.itu.edu.tr/hizmetler/e-posta-hizmetleri/e-posta).
+#   Boğaziçi: personel @bogazici.edu.tr, öğrenci @std.bogazici.edu.tr, mezun
+#     @alumni.bogazici.edu.tr (bilgiislem.bogazici.edu.tr/en/pages/e-mail/4597);
+#     @boun.edu.tr 2023'te bırakıldı, 2024-02-01'den beri gönderime kapalı
+#     (bilgiislem.bogazici.edu.tr duyuru 2500).
 # Lisans: olgusal kamu bilgisi. DURUM: ÖRNEK VERİ; pilot öncesi her alan adı
 # ilgili üniversiteyle doğrulanmalıdır (PS-09).
 domain,university_yok_code,domain_kind
 metu.edu.tr,ORNEK-ODTU,mixed
+alumni.metu.edu.tr,ORNEK-ODTU,alumni
 itu.edu.tr,ORNEK-ITU,mixed
-boun.edu.tr,ORNEK-BOUN,mixed
-bogazici.edu.tr,ORNEK-BOUN,mixed
+std.bogazici.edu.tr,ORNEK-BOUN,student
+bogazici.edu.tr,ORNEK-BOUN,staff
+boun.edu.tr,ORNEK-BOUN,staff
+alumni.bogazici.edu.tr,ORNEK-BOUN,alumni

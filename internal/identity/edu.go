@@ -22,8 +22,10 @@ import (
 //
 //   - e-mail path: startEduVerification resolves the address's domain to a
 //     university (hooks.domainResolver: directory's allow-list of university
-//     domains, usually .edu.tr, since BE-220 also another official domain
-//     such as sabanciuniv.edu; identity never judges a domain by its shape)
+//     student domains, usually .edu.tr, since BE-220 also another official
+//     domain such as sabanciuniv.edu; since BE-228 exactly a listed student
+//     or mixed domain, never a subdomain of one or an alumni or staff
+//     domain; identity never judges a domain by its shape)
 //     and mails a derived, single-use token (24 h) to the address;
 //     confirmEduVerification turns it into a verified row valid for one
 //     year. No row exists before the confirmation, so nobody can reserve
@@ -185,7 +187,8 @@ func ageKnown(u User) error {
 // domain is unknown: the safe default keeps the student role closed and
 // points at the document path.
 func (s *service) resolveDomain(ctx context.Context, domain, location string) (uuid.UUID, error) {
-	unknown := invalid(ErrEduDomainUnknown, location, "is not an address of a known university; submit a student document instead")
+	unknown := invalid(ErrEduDomainUnknown, location,
+		"is not a student address of a known university (alumni and staff addresses do not count); submit a student document instead")
 	if s.d.Domains == nil {
 		return uuid.Nil(), unknown
 	}

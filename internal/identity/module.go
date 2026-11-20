@@ -367,7 +367,8 @@ type Deps struct {
 
 	// Student verification (BE-018). Domains resolves university domains
 	// (hooks.domainResolver: the directory's allow-list; BE-220 not only
-	// .edu.tr); nil → every domain is unknown (422
+	// .edu.tr; BE-228 exact student or mixed rows, never an alumni or
+	// staff domain); nil → every domain is unknown (422
 	// identity.edu_domain_unknown: the document path stays open). Files
 	// holds student documents and deletes them on erasure, after a virus
 	// finding and at the end of their retention; nil → the document

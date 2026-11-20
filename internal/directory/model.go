@@ -47,18 +47,29 @@ type University struct {
 // TableName implements gorm's Tabler.
 func (University) TableName() string { return "universities" }
 
-// DomainKind is university_email_domains.domain_kind (02 §8.2).
+// DomainKind is university_email_domains.domain_kind (02 §8.2): who gets
+// mailboxes under the domain.
 type DomainKind string
 
-// Domain kinds.
+// Domain kinds. Only student and mixed domains prove a student (BE-228,
+// domain.go); staff and alumni domains still name the university's
+// addresses (UniversityByEmailDomain).
 const (
 	DomainStudent DomainKind = "student"
 	DomainStaff   DomainKind = "staff"
 	DomainMixed   DomainKind = "mixed"
+	DomainAlumni  DomainKind = "alumni" // graduates' lifelong mailboxes (000191)
 )
 
 // Valid reports whether k is a value of university_email_domains_domain_kind_chk.
-func (k DomainKind) Valid() bool { return k == DomainStudent || k == DomainStaff || k == DomainMixed }
+func (k DomainKind) Valid() bool {
+	return k == DomainStudent || k == DomainStaff || k == DomainMixed || k == DomainAlumni
+}
+
+// ProvesStudent reports whether a mailbox under a domain of kind k proves a
+// student (StudentUniversityByEmailDomain): student and mixed domains do; a
+// staff or alumni mailbox never does.
+func (k DomainKind) ProvesStudent() bool { return k == DomainStudent || k == DomainMixed }
 
 // EmailDomain is one university_email_domains row (02 §8.2). VerifiedBy
 // references the platform admin who registered it.

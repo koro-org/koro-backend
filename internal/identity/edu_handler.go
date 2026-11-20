@@ -19,11 +19,12 @@ func registerEdu(api huma.API, h handler) {
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "startEduVerification", Method: http.MethodPost, Path: "/me/edu-verifications", DefaultStatus: http.StatusAccepted,
 		Summary: "Verify (or renew) my student status with a university e-mail address",
-		Description: "A single-use link (valid 24 hours) goes to the address. The domain must be one the directory lists " +
-			"for a university (usually .edu.tr; another official domain such as sabanciuniv.edu when listed). " +
-			"202 whether or not the address is " +
+		Description: "A single-use link (valid 24 hours) goes to the address. The domain must be exactly one the directory " +
+			"lists as a student domain of a university (usually .edu.tr; another official domain such as sabanciuniv.edu " +
+			"when listed); a subdomain of it is not covered. 202 whether or not the address is " +
 			"free: an address that verifies another account gets nothing (no enumeration). An address whose domain " +
-			"is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account " +
+			"is not a student domain of a known university (unlisted, or an alumni or staff domain) is 422 " +
+			"identity.edu_domain_unknown: submit a student document instead. An account " +
 			"without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one " +
 			"keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer " +
 			"takes at least 0.5 s (BE-200).",

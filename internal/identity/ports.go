@@ -155,8 +155,10 @@ type Files interface {
 }
 
 // DomainResolver maps the domain of a student address to a university
-// (hooks.domainResolver: directory.Catalog.UniversityByEmailDomain, 01 §5.3;
-// identity never imports directory). found=false: not a known university.
+// (hooks.domainResolver: directory.Catalog.StudentUniversityByEmailDomain,
+// 01 §5.3; identity never imports directory). found=false: not a student
+// domain of a known university (unlisted, a subdomain of a listed one, or
+// a staff or alumni domain; BE-228).
 type DomainResolver func(ctx context.Context, domain string) (universityID uuid.UUID, found bool, err error)
 
 // UniversityNames returns the display names of universities (directory).

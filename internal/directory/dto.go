@@ -69,7 +69,7 @@ type EmailDomainList struct {
 type EmailDomainDTO struct {
 	Domain       string `json:"domain"`
 	UniversityID string `json:"university_id"`
-	DomainKind   string `json:"domain_kind" enum:"student,staff,mixed"`
+	DomainKind   string `json:"domain_kind" enum:"student,staff,mixed,alumni"`
 	IsActive     bool   `json:"is_active"`
 }
 

@@ -17,11 +17,15 @@ const TypeIngestCatalog = "ingest_catalog"
 //	ingest.suggestion.promote              S: club_admin of the club only (the draft is the
 //	                                       club's own, events.event.create decides again)
 //	ingest.suggestion.reject               S: club_admin of the club only
+//	ingest.quick_import.run                S: club_admin of the club only (BE-211: the club's own
+//	                                       post read into draft fields for its createEvent, which
+//	                                       only the club's event managers may call; no platform role)
 //	ingest.source.*, ingest.imported_event.list_admin/moderate/delete,
 //	ingest.imported_club.list/review       platform_admin (admin surface)
 //
-// Resources: the public catalog is TypeIngestCatalog; the suggestions pass
-// the TypeOrg resource of the path's club (org_kind, org_status), visible
+// Resources: the public catalog is TypeIngestCatalog; the suggestions and
+// the quick import pass the TypeOrg resource of the path's club (org_kind,
+// org_status), visible
 // to the club's active members (a member without the role gets 403) and to
 // platform staff (403 unless platform_admin), 404 for everyone else (03
 // §3.6); the admin operations the admin surface (403 without the role,
@@ -33,7 +37,7 @@ func ingestPolicy() Policy {
 			switch act {
 			case IngestImportedEventList, IngestImportedEventRead, IngestImportedEventRequestRemoval:
 				return r.Type == TypeIngestCatalog
-			case IngestSuggestionList, IngestSuggestionPromote, IngestSuggestionReject:
+			case IngestSuggestionList, IngestSuggestionPromote, IngestSuggestionReject, IngestQuickImportRun:
 				return r.Type == TypeOrg && OrgSurfaceVisible(a, r.OrgID)
 			case IngestSourceList, IngestSourceRead, IngestSourceCreate, IngestSourceUpdate, IngestSourceRun,
 				IngestImportedEventListAdmin, IngestImportedEventModerate, IngestImportedEventDelete,
@@ -53,7 +57,7 @@ func ingestPolicy() Policy {
 					gs = append(gs, Grant{Role: RoleClubAdmin})
 				}
 				return gs
-			case IngestSuggestionPromote, IngestSuggestionReject:
+			case IngestSuggestionPromote, IngestSuggestionReject, IngestQuickImportRun:
 				if clubAdmin {
 					return []Grant{{Role: RoleClubAdmin}}
 				}

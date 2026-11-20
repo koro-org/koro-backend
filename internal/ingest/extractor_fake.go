@@ -105,3 +105,46 @@ func fakeDate(line string, year int) (Candidate, bool) {
 	}
 	return Candidate{}, false
 }
+
+// placeRe finds the place line of a post: "📍 …", "Yer: …", "Konum: …",
+// "Location: …".
+var placeRe = regexp.MustCompile(`(?im)^\s*(?:📍\s*|(?:yer|konum|mekan|mekân|location|place|venue)\s*[:：]\s*)(\S.*)$`)
+
+// Draft implements Extractor: one draft per dated line of the text (the
+// patterns of Extract, at most maxDrafts), the place line as the location,
+// the text's beginning as the summary, fixed confidences. It reads no
+// image (ImagesRead false): with posters only it finds nothing.
+func (f FakeExtractor) Draft(ctx context.Context, req DraftRequest) (DraftExtraction, error) {
+	var out DraftExtraction
+	if strings.TrimSpace(req.Text) == "" {
+		return out, nil
+	}
+	ex, err := f.Extract(ctx, ExtractRequest{Docs: []Document{{Text: req.Text}}, Today: req.Today})
+	if err != nil {
+		return out, err
+	}
+	place := ""
+	if m := placeRe.FindStringSubmatch(req.Text); m != nil {
+		place = strings.TrimSpace(m[1])
+	}
+	summary := clip(strings.Join(strings.Fields(req.Text), " "), maxDraftSummary)
+	for _, c := range ex.Candidates {
+		if len(out.Drafts) == maxDrafts {
+			break
+		}
+		d := DraftCandidate{Title: c.Title, StartDate: c.StartDate, StartTime: c.StartTime, EndTime: c.EndTime,
+			YearStated: c.YearStated, Location: place, Summary: summary, Category: string(CategoryOther), Evidence: c.Evidence,
+			Confidence: DraftConfidence{Title: 0.6, Start: 0.7, Summary: 0.4, Category: 0.3}}
+		if c.YearStated {
+			d.Confidence.Start = 0.9
+		}
+		if c.EndTime != "" {
+			d.Confidence.End = 0.7
+		}
+		if place != "" {
+			d.Confidence.Location = 0.6
+		}
+		out.Drafts = append(out.Drafts, d)
+	}
+	return out, nil
+}

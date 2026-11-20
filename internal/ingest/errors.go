@@ -24,6 +24,11 @@ var (
 	ErrInvalidState = problem.New(problem.Conflict, "ingest.invalid_state", "Imported event state does not allow this")
 	// ErrUnknownPilot: no built-in sources for this pilot key.
 	ErrUnknownPilot = problem.New(problem.Invalid, "ingest.unknown_pilot", "Unknown pilot university")
+	// ErrQuickImportImagesOff: the quick import was given posters while
+	// reading posters is off in this environment (INGEST_QUICK_IMPORT_IMAGES;
+	// prod until the lawyer's review): paste the post text instead.
+	ErrQuickImportImagesOff = problem.New(problem.Invalid, "ingest.quick_import_images_off",
+		"Reading posters is turned off; paste the post text")
 )
 
 // errUnavailable: a late-bound dependency is missing (503).

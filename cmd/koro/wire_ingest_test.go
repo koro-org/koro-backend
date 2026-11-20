@@ -13,6 +13,7 @@ import (
 	"koro/internal/platform/config"
 	"koro/internal/platform/db"
 	"koro/internal/platform/obs"
+	"koro/internal/platform/ratelimit"
 )
 
 // useMemStore installs the in-memory ingest store, a fetcher without
@@ -133,5 +134,56 @@ func TestWire_IngestPromotesThroughEvents(t *testing.T) {
 	got, err := c.ingest.store.GetEvent(ctx, ev.ID)
 	if err != nil || got.Status != ingest.StatusPromoted || got.PromotedEventID == nil || *got.PromotedEventID != v.Event.ID {
 		t.Fatalf("imported event = %+v %v", got, err)
+	}
+}
+
+// TestWire_IngestQuickImportUsesTheSharedLimiter (BE-211): over the real
+// wiring a club's club_admin reads a pasted post into a draft (the fake
+// extractor of the zero configuration), counted against the club's limits
+// and the platform's daily budget in the container's limiter (Redis in
+// production); nothing is stored as an imported event.
+func TestWire_IngestQuickImportUsesTheSharedLimiter(t *testing.T) {
+	t.Parallel()
+	c := newTestContainer(t)
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	if _, err := c.directory.svc.ImportReference(ctx, directory.ReferenceData{Universities: []directory.RefUniversity{
+		{YokCode: "ING-Q", Name: "Hızlı İçe Aktar Üniversitesi", City: "İzmir", Type: directory.UniversityState}}}); err != nil {
+		t.Fatal(err)
+	}
+	unis, err := c.directory.svc.ListUniversities(ctx, authz.Anonymous(), directory.UniversityQuery{Q: "Hızlı İçe Aktar"})
+	if err != nil || len(unis.Items) != 1 {
+		t.Fatalf("university = %+v %v", unis, err)
+	}
+	club, _, err := c.directory.svc.ImportClub(ctx, directory.ImportedClub{UniversityID: unis.Items[0].ID, Name: "Girişim Kulübü",
+		Category: directory.CategoryTechnology, Job: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := authz.Actor{Kind: authz.KindUser, UserID: uuid.NewV7(), SessionID: uuid.NewV7(), StudentStatus: authz.StudentVerified,
+		Memberships: []authz.Membership{{OrgID: club, OrgKind: authz.OrgClub, Role: authz.MemberClubAdmin}}}
+	r, err := c.ingest.svc.QuickImport(ctx, admin, club, ingest.QuickImportInput{Text: "Girişimcilik Zirvesi\n5 Aralık 2026 10:00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Drafts) != 1 || r.Drafts[0].Title != "Girişimcilik Zirvesi" || r.Drafts[0].StartsAt == nil {
+		t.Fatalf("quick import = %+v", r)
+	}
+	mem, ok := c.infra.limiter.(*ratelimit.Mem)
+	if !ok {
+		t.Fatalf("limiter = %T", c.infra.limiter)
+	}
+	calls := strings.Join(mem.Calls(), " ")
+	for _, want := range []string{"ingest_quick_import_org_hour|org:" + club.String(), "ingest_quick_import_org_day|org:" + club.String(),
+		"ingest_quick_import_day|platform"} {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("limiter calls %q lack %q", calls, want)
+		}
+	}
+	page, err := c.ingest.svc.ListSuggestions(ctx, admin, club, ingest.EventQuery{})
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("suggestions after a quick import = %+v %v", page, err)
 	}
 }

@@ -31,8 +31,10 @@ import (
 // directory.ClubImports, in ingest's transaction), c.orgs.svc (the club of
 // a suggestion, the club names of the cards), c.events.svc (the draft of a
 // promoted suggestion, in ingest's transaction), c.notify.svc (the new
-// admin's notice), c.audit.svc and hooks.retention (imported_event, read
-// at run time through c.retention).
+// admin's notice), c.files.svc (the quick import's posters: event_cover
+// uploads, BE-211), c.infra.limiter (the quick import's per-club limits and
+// daily budget), c.audit.svc and hooks.retention (imported_event, read at
+// run time through c.retention).
 //
 // Provided: nothing to other modules. Tasks: ingest.fetch_due, ingest.purge_expired
 // and the club_claim.decided subscription ingest.pause_claimed_sources.
@@ -113,6 +115,8 @@ func (w *ingestWiring) build(c *container) error {
 			ListInterval: cfg.ListInterval, EventsInterval: cfg.EventsInterval, HostGap: cfg.HostGap,
 			FailLimit: cfg.FailLimit, ZeroYieldAlarm: cfg.ZeroYieldAlarm, MaxTextChars: cfg.MaxTextChars,
 			MinConfidence: cfg.MinConfidence, EventRetention: cfg.EventRetention,
+			QuickImportImages: cfg.QuickImportImagesEnabled(), QuickImportOrgHourly: cfg.QuickImportOrgHourly,
+			QuickImportOrgDaily: cfg.QuickImportOrgDaily, QuickImportDailyBudget: cfg.QuickImportDailyBudget,
 		},
 		EventRetention: c.retention("imported_event", cfg.EventRetention, 7*24*time.Hour),
 	}
@@ -121,6 +125,12 @@ func (w *ingestWiring) build(c *container) error {
 	}
 	if c.notify.svc != nil {
 		d.Sender = c.notify.svc
+	}
+	if c.files.svc != nil {
+		d.Files = c.files.svc
+	}
+	if c.infra.limiter != nil {
+		d.Limiter = c.infra.limiter
 	}
 	mod, err := ingest.New(d)
 	if err != nil {
@@ -140,20 +150,23 @@ func (w *ingestWiring) tasks(c *container) {
 	}
 }
 
-// routes: the 17 ingest operations (04 §2.25 doc patch); w.svc is nil under
+// routes: the 18 ingest operations (04 §2.25 doc patch); w.svc is nil under
 // `koro openapi`, which Register tolerates.
 func (w *ingestWiring) routes(c *container, api huma.API) { ingest.Register(api, w.svc) }
 
-// metrics registers the ingest counters on the worker's registry (the runs
-// happen there; BE-210): koro_ingest_runs_total{outcome},
-// koro_ingest_tokens_total{kind}, koro_ingest_items_total{kind} and
-// koro_ingest_alarms_total{reason}. nil m → metrics off.
+// metrics registers the ingest counters on a process's registry: the
+// worker's (the runs happen there; BE-210) and the API's (the quick imports
+// happen there; BE-211). Each process counts its own:
+// koro_ingest_runs_total{outcome}, koro_ingest_tokens_total{kind},
+// koro_ingest_items_total{kind}, koro_ingest_alarms_total{reason} and
+// koro_ingest_quick_imports_total{outcome}. nil m → metrics off.
 func (w *ingestWiring) metrics(m *obs.Metrics) error {
 	for _, metric := range []struct{ name, label, help string }{
 		{"runs", "outcome", "Ingest source runs by outcome."},
-		{"tokens", "kind", "Extractor tokens by kind (input, output): the language model's cost."},
+		{"tokens", "kind", "Extractor tokens by kind (input, output; quick_import_input, quick_import_output): the language model's cost."},
 		{"items", "kind", "Ingest items by kind (event_created, event_rejected, club_created, club_matched, removal_request)."},
 		{"alarms", "reason", "Ingest alarms by reason (zero_yield: a source that yielded comes back empty; paused_failures)."},
+		{"quick_imports", "outcome", "Quick imports by outcome (ok, empty, unreadable, failed, rate_limited)."},
 	} {
 		name := metric.name
 		if err := m.CounterFunc("koro_ingest_"+name+"_total", metric.help, []string{metric.label}, func() []obs.Sample {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 	"uuid"
 
@@ -135,7 +134,7 @@ func draftOf(e ImportedEvent) events.EventInput {
 	}
 	if e.LocationText != nil {
 		loc := *e.LocationText
-		if strings.EqualFold(strings.TrimSpace(loc), "online") || strings.EqualFold(strings.TrimSpace(loc), "çevrim içi") {
+		if isOnline(loc) {
 			in.Format = events.FormatOnline
 		} else {
 			in.LocationName = clip(loc, 200)

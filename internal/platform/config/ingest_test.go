@@ -75,3 +75,42 @@ func TestIngest_DefaultsSourceDefaultAndValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestIngest_QuickImportImagesAndLimits (BE-211): posters are read in dev
+// and staging, not in prod (auto) unless set; the per-club limits and the
+// daily budget have defaults and bounds (a daily limit below the hourly one
+// is refused).
+func TestIngest_QuickImportImagesAndLimits(t *testing.T) {
+	t.Parallel()
+	for env, want := range map[string]bool{"dev": true, "staging": true, "prod": false} {
+		c, err := config.Load[ingestOnly](ingestEnv("APP_ENV", env, "LOG_FORMAT", "json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		g := c.Ingest
+		if g.QuickImportImagesEnabled() != want || g.QuickImportOrgHourly != 20 || g.QuickImportOrgDaily != 60 ||
+			g.QuickImportDailyBudget != 1000 {
+			t.Errorf("%s: images %v (want %v), limits %d/%d/%d", env, g.QuickImportImagesEnabled(), want,
+				g.QuickImportOrgHourly, g.QuickImportOrgDaily, g.QuickImportDailyBudget)
+		}
+	}
+	if c, err := config.Load[ingestOnly](ingestEnv("APP_ENV", "prod", "LOG_FORMAT", "json",
+		"INGEST_QUICK_IMPORT_IMAGES", " Enabled ")); err != nil || !c.Ingest.QuickImportImagesEnabled() {
+		t.Fatalf("prod enabled = %v %v", c.Ingest.QuickImportImagesEnabled(), err)
+	}
+	if c, err := config.Load[ingestOnly](ingestEnv("INGEST_QUICK_IMPORT_IMAGES", "disabled")); err != nil ||
+		c.Ingest.QuickImportImagesEnabled() {
+		t.Fatalf("dev disabled = %v %v", c.Ingest.QuickImportImagesEnabled(), err)
+	}
+	for _, tc := range []struct{ name, key, value, want string }{
+		{"unknown images switch", "INGEST_QUICK_IMPORT_IMAGES", "yes", "INGEST_QUICK_IMPORT_IMAGES"},
+		{"no hourly quick import", "INGEST_QUICK_IMPORT_ORG_HOURLY", "0", "INGEST_QUICK_IMPORT_ORG_HOURLY"},
+		{"daily below hourly", "INGEST_QUICK_IMPORT_ORG_DAILY", "10", "INGEST_QUICK_IMPORT_ORG_DAILY"},
+		{"no daily budget", "INGEST_QUICK_IMPORT_DAILY_BUDGET", "0", "INGEST_QUICK_IMPORT_DAILY_BUDGET"},
+	} {
+		_, err := config.Load[ingestOnly](ingestEnv(tc.key, tc.value))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want it to name %s", tc.name, err, tc.want)
+		}
+	}
+}

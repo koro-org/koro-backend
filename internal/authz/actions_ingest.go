@@ -1,7 +1,8 @@
 // Action constants of the ingest module (BE-210; 03 §5.25 doc patch): the
 // clubs and events collected from official pages (research
-// kulup-etkinlik-toplama-2026-11-11, Aşama 1). TestActions_CountMatchesDesign
-// and TestActions_MatchDesignDoc pin the content.
+// kulup-etkinlik-toplama-2026-11-11, Aşama 1) and the club's quick import
+// (BE-211, Aşama 2). TestActions_CountMatchesDesign and
+// TestActions_MatchDesignDoc pin the content.
 
 package authz
 
@@ -23,6 +24,7 @@ const (
 	IngestImportedEventDelete         Action = "ingest.imported_event.delete"
 	IngestImportedClubList            Action = "ingest.imported_club.list"
 	IngestImportedClubReview          Action = "ingest.imported_club.review"
+	IngestQuickImportRun              Action = "ingest.quick_import.run"
 )
 
 // ingestActions lists the HTTP actions of ingest in 03 §5.25 order.
@@ -31,5 +33,5 @@ var ingestActions = []Action{
 	IngestSuggestionList, IngestSuggestionPromote, IngestSuggestionReject,
 	IngestSourceList, IngestSourceRead, IngestSourceCreate, IngestSourceUpdate, IngestSourceRun,
 	IngestImportedEventListAdmin, IngestImportedEventModerate, IngestImportedEventDelete,
-	IngestImportedClubList, IngestImportedClubReview,
+	IngestImportedClubList, IngestImportedClubReview, IngestQuickImportRun,
 }

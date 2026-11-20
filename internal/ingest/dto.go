@@ -3,6 +3,8 @@ package ingest
 import (
 	"time"
 	"uuid"
+
+	"koro/internal/events"
 )
 
 // The JSON shapes of the ingest operations (04 §2.25 doc patch).
@@ -231,4 +233,58 @@ func toClubDTO(c ClubItem) ImportedClubDTO {
 		ContactEmail: deref(c.Club.ContactEmail), FirstSeenAt: c.Club.FirstSeenAt, LastSeenAt: c.Club.LastSeenAt,
 		MissingSince: c.Club.MissingSince,
 	}
+}
+
+// QuickImportConfidenceDTO is the extractor's confidence (0–1) per field of
+// a quick import draft; 0 for a field it left empty.
+type QuickImportConfidenceDTO struct {
+	Title    float64 `json:"title"`
+	StartsAt float64 `json:"starts_at"`
+	EndsAt   float64 `json:"ends_at"`
+	Location float64 `json:"location"`
+	Summary  float64 `json:"summary"`
+	Category float64 `json:"category"`
+}
+
+// QuickImportDraftDTO is one draft of a quick import: the fields of
+// createEvent the post gives (title, starts_at, ends_at, format,
+// location_name, summary, category), each with a confidence. Not saved.
+type QuickImportDraftDTO struct {
+	Title        string                   `json:"title" doc:"At most 160 characters; never a person's name"`
+	StartsAt     *time.Time               `json:"starts_at,omitempty" doc:"Europe/Istanbul; omitted when the post gives no usable date"`
+	EndsAt       *time.Time               `json:"ends_at,omitempty"`
+	AllDay       bool                     `json:"all_day" doc:"The post gives a date without a time: starts_at is the start of that day"`
+	Format       string                   `json:"format" enum:"in_person,online"`
+	LocationName string                   `json:"location_name,omitempty" doc:"The place as the post writes it (at most 200 characters)"`
+	Summary      string                   `json:"summary,omitempty" doc:"One or two sentences (at most 300 characters); people only by role"`
+	Category     string                   `json:"category" enum:"workshop,talk,competition,career,social,trip,sports,culture,volunteering,other"`
+	Evidence     string                   `json:"evidence" doc:"The words the draft was read from: a quote of the text, or the poster's words"`
+	Verified     bool                     `json:"verified" doc:"evidence is a quote of the pasted text; false: read from the poster, check every field"`
+	Confidence   QuickImportConfidenceDTO `json:"confidence"`
+}
+
+// QuickImportResultDTO is the answer of a quick import.
+type QuickImportResultDTO struct {
+	Drafts []QuickImportDraftDTO `json:"drafts" doc:"At most 5, usually one; empty when nothing could be read (type the event in)"`
+	// ImagesRead is false when posters were given but not read.
+	ImagesRead bool `json:"images_read" doc:"false with file_ids: this environment's extractor does not read images (development)"`
+}
+
+func toQuickImportDTO(r QuickImportResult) QuickImportResultDTO {
+	out := QuickImportResultDTO{Drafts: make([]QuickImportDraftDTO, len(r.Drafts)), ImagesRead: r.ImagesRead}
+	for i, d := range r.Drafts {
+		format := events.FormatInPerson
+		if d.Online {
+			format = events.FormatOnline
+		}
+		out.Drafts[i] = QuickImportDraftDTO{
+			Title: d.Title, StartsAt: d.StartsAt, EndsAt: d.EndsAt, AllDay: d.AllDay, Format: string(format),
+			LocationName: d.Location, Summary: d.Summary, Category: string(d.Category), Evidence: d.Evidence,
+			Verified: d.Verified,
+			Confidence: QuickImportConfidenceDTO{Title: round2(d.Confidence.Title), StartsAt: round2(d.Confidence.Start),
+				EndsAt: round2(d.Confidence.End), Location: round2(d.Confidence.Location),
+				Summary: round2(d.Confidence.Summary), Category: round2(d.Confidence.Category)},
+		}
+	}
+	return out
 }

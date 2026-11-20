@@ -73,6 +73,9 @@ func runAPI(ctx context.Context, stop context.CancelFunc, environ map[string]str
 	if err := c.outreach.metrics(tel.Metrics); err != nil { // koro_outreach_count_alarms_total (BE-203)
 		return err
 	}
+	if err := c.ingest.metrics(tel.Metrics); err != nil { // koro_ingest_quick_imports_total, quick import tokens (BE-211)
+		return err
+	}
 	var global []gin.HandlerFunc
 	if cfg.RateLimit.Enabled {
 		web := ratelimit.NewWebKeys(cfg.RateLimit.WebKeyList())

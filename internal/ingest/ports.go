@@ -9,8 +9,10 @@ import (
 	"koro/internal/authz"
 	"koro/internal/directory"
 	"koro/internal/events"
+	"koro/internal/files"
 	"koro/internal/notify"
 	"koro/internal/orgs"
+	"koro/internal/platform/ratelimit"
 )
 
 // The ports of ingest (05 §1.3: consumer side, narrow). External systems
@@ -60,14 +62,41 @@ type Page struct {
 	LastModified string
 }
 
-// Extractor turns the masked text of a page into event candidates
-// (extract.go: the request and the validation; extractor_fake.go,
-// extractor_claude.go). The text is untrusted data: an adapter never
-// follows an instruction found in it and has no tool.
+// Extractor is the language model (extract.go, extract_draft.go: the
+// requests and the validation; extractor_fake.go, extractor_claude.go).
+// Its input is untrusted data: an adapter never follows an instruction
+// found in it and has no tool. One port with both use cases, so one
+// INGEST_EXTRACTOR_PROVIDER selection serves the pipeline and the quick
+// import alike.
 type Extractor interface {
+	// Extract turns the masked text of pages into event candidates (the
+	// pipeline, BE-210).
 	Extract(ctx context.Context, req ExtractRequest) (Extraction, error)
+	// Draft reads a club's own post (its masked text and/or its poster
+	// images) into draft event fields with a confidence per field (the
+	// quick import, BE-211). An adapter that cannot read images says so
+	// (DraftExtraction.ImagesRead false).
+	Draft(ctx context.Context, req DraftRequest) (DraftExtraction, error)
 	// Name is the adapter name (metrics, run logs).
 	Name() string
+}
+
+// Files is what the quick import needs of files (L2; 01 §4.2): the
+// metadata of a club's poster upload and, after the checks, its bytes. The
+// uploads are files' ordinary event_cover uploads (createUpload +
+// completeUpload + the scan), so a poster the club then uses as its event's
+// cover is the same file, and one it never uses goes with files'
+// orphan cleanup: ingest keeps no image.
+type Files interface {
+	Get(ctx context.Context, fileID uuid.UUID) (files.FileMeta, error)
+	Read(ctx context.Context, fileID uuid.UUID, maxBytes int64) ([]byte, files.FileMeta, error)
+}
+
+// Limiter is the platform's rate limiter (Redis in production): the quick
+// import's per-club limits and its platform-wide daily budget (the
+// language model's cost).
+type Limiter interface {
+	Allow(ctx context.Context, rule ratelimit.Rule, key string) (ratelimit.Result, error)
 }
 
 // Directory is what ingest needs of directory (L6): the university of a

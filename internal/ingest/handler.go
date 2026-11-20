@@ -15,7 +15,8 @@ import (
 	"koro/internal/platform/problem"
 )
 
-// Register adds the ingest operations (04 §2.25 doc patch; BE-210) to api.
+// Register adds the ingest operations (04 §2.25 doc patch; BE-210, BE-211)
+// to api.
 // svc may be nil (`koro openapi`): handlers only touch it when called.
 func Register(api huma.API, svc Service) {
 	h := handler{svc: svc}
@@ -64,6 +65,19 @@ func Register(api huma.API, svc Service) {
 		Summary: "Decline a collected event of the club",
 	}, op.Meta{Action: string(authz.IngestSuggestionReject), Surface: op.SurfaceOrg,
 		Idempotency: op.IdempotencyOptional}, h.reject)
+
+	op.Register(api, "ingest", huma.Operation{
+		OperationID: "quickImportClubEvent", Method: http.MethodPost, Path: "/orgs/{org_id}/quick-import",
+		Summary: "Read the club's post or poster into draft event fields",
+		Description: "The club's own announcement — the text of its post (an Instagram caption), its poster (an " +
+			"event_cover upload of the club: createUpload, completeUpload, then the scan) or both — read into the fields " +
+			"of createEvent with a confidence per field. Nothing is saved: check and correct the drafts, then create the " +
+			"event (a poster becomes its cover with cover_file_id; one never used is deleted with the other unused " +
+			"uploads). Personal data in the text is masked before it is read; posters are read only where this " +
+			"environment allows it (422 ingest.quick_import_images_off). Limited per club and per day (429 with " +
+			"Retry-After); a poster still being scanned is 409 files.not_clean (retry).",
+	}, op.Meta{Action: string(authz.IngestQuickImportRun), Surface: op.SurfaceOrg,
+		Idempotency: op.IdempotencyOptional}, h.quickImport)
 
 	op.Register(api, "ingest", huma.Operation{
 		OperationID: "adminListIngestSources", Method: http.MethodGet, Path: "/admin/ingest/sources",
@@ -372,6 +386,32 @@ func (h handler) reject(ctx context.Context, in *suggestionInput) (*noContent, e
 		return nil, err
 	}
 	return &noContent{}, nil
+}
+
+type quickImportInput struct {
+	OrgPath
+	Body struct {
+		Text    string   `json:"text,omitempty" maxLength:"5000" doc:"The post's text as pasted (line breaks kept)"`
+		FileIDs []string `json:"file_ids,omitempty" maxItems:"3" doc:"The posters: event_cover uploads of the club, scanned"`
+	}
+}
+
+type quickImportOutput struct{ Body QuickImportResultDTO }
+
+func (h handler) quickImport(ctx context.Context, in *quickImportInput) (*quickImportOutput, error) {
+	a, err := authz.ActorFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	qi := QuickImportInput{Text: in.Body.Text, FileIDs: make([]uuid.UUID, len(in.Body.FileIDs))}
+	for i, s := range in.Body.FileIDs {
+		qi.FileIDs[i] = httpx.ParseID(s) // a malformed ID is no upload of the club (422 after authz)
+	}
+	r, err := h.svc.QuickImport(ctx, a, httpx.ParseID(in.OrgID), qi)
+	if err != nil {
+		return nil, err
+	}
+	return &quickImportOutput{Body: toQuickImportDTO(r)}, nil
 }
 
 // ---- admin: sources

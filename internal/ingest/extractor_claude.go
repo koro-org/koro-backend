@@ -149,27 +149,44 @@ var ErrExtractRefused = errors.New("ingest: the extractor gave no usable answer"
 
 // Extract implements Extractor.
 func (c *ClaudeExtractor) Extract(ctx context.Context, req ExtractRequest) (Extraction, error) {
+	var answer struct {
+		Events []Candidate `json:"events"`
+	}
+	in, out, err := c.call(ctx, extractSystem, extractSchema, &answer, anthropic.NewTextBlock(prompt(req)))
+	if err != nil {
+		return Extraction{InputTokens: in, OutputTokens: out}, err
+	}
+	return Extraction{Candidates: answer.Events, InputTokens: in, OutputTokens: out}, nil
+}
+
+// call sends one Messages API request: the system prompt (cached), the
+// user content, structured output with schema at low effort, no tool. It
+// decodes the answer into answer and returns the tokens used; a refusal,
+// a truncated or an undecodable answer is ErrExtractRefused (the tokens
+// are counted all the same).
+func (c *ClaudeExtractor) call(ctx context.Context, system string, schema map[string]any, answer any,
+	content ...anthropic.ContentBlockParamUnion) (int, int, error) {
 	resp, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     anthropic.Model(c.cfg.Model),
 		MaxTokens: int64(c.cfg.MaxTokens),
-		System:    []anthropic.TextBlockParam{{Text: extractSystem, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(prompt(req)))},
+		System:    []anthropic.TextBlockParam{{Text: system, CacheControl: anthropic.NewCacheControlEphemeralParam()}},
+		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(content...)},
 		OutputConfig: anthropic.OutputConfigParam{
 			Effort: anthropic.OutputConfigEffortLow,
-			Format: anthropic.JSONOutputFormatParam{Schema: extractSchema},
+			Format: anthropic.JSONOutputFormatParam{Schema: schema},
 		},
 	})
 	if err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) {
-			return Extraction{}, fmt.Errorf("ingest: extractor API status %d", apiErr.StatusCode)
+			return 0, 0, fmt.Errorf("ingest: extractor API status %d", apiErr.StatusCode)
 		}
-		return Extraction{}, fmt.Errorf("ingest: extractor: %w", err)
+		return 0, 0, fmt.Errorf("ingest: extractor: %w", err)
 	}
-	out := Extraction{InputTokens: int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens +
-		resp.Usage.CacheCreationInputTokens), OutputTokens: int(resp.Usage.OutputTokens)}
+	in := int(resp.Usage.InputTokens + resp.Usage.CacheReadInputTokens + resp.Usage.CacheCreationInputTokens)
+	out := int(resp.Usage.OutputTokens)
 	if resp.StopReason == anthropic.StopReasonRefusal || resp.StopReason == anthropic.StopReasonMaxTokens {
-		return out, fmt.Errorf("%w (%s)", ErrExtractRefused, resp.StopReason)
+		return in, out, fmt.Errorf("%w (%s)", ErrExtractRefused, resp.StopReason)
 	}
 	var text strings.Builder
 	for _, block := range resp.Content {
@@ -177,12 +194,8 @@ func (c *ClaudeExtractor) Extract(ctx context.Context, req ExtractRequest) (Extr
 			text.WriteString(t.Text)
 		}
 	}
-	var answer struct {
-		Events []Candidate `json:"events"`
+	if err := json.Unmarshal([]byte(text.String()), answer); err != nil {
+		return in, out, fmt.Errorf("%w: %w", ErrExtractRefused, err)
 	}
-	if err := json.Unmarshal([]byte(text.String()), &answer); err != nil {
-		return out, fmt.Errorf("%w: %w", ErrExtractRefused, err)
-	}
-	out.Candidates = answer.Events
-	return out, nil
+	return in, out, nil
 }

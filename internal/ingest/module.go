@@ -47,9 +47,17 @@
 //   - Politeness: robots.txt, one fetch per host per tick, at least
 //     INGEST_HOST_GAP (and the host's Crawl-delay) between two fetches of a
 //     host, the KoroBot/1.0 User-Agent with the bot page URL.
+//   - Quick import (BE-211, quickimport.go; research Aşama 2): a club's
+//     admin pastes the club's own post text and/or gives its poster (an
+//     event_cover upload); the extractor reads draft event fields with a
+//     confidence per field; nothing is stored (a preview for createEvent).
+//     The text is masked first; posters are read only where
+//     INGEST_QUICK_IMPORT_IMAGES allows it. Per-club limits and a
+//     platform-wide daily budget bound the model's cost.
 //   - Authorisation (03 §5.25 doc patch): the public reads and the removal
-//     request are P; the suggestions are the club_admin's (org surface);
-//     everything else is the platform admin's (admin surface).
+//     request are P; the suggestions and the quick import are the
+//     club_admin's (org surface); everything else is the platform admin's
+//     (admin surface).
 package ingest
 
 import (
@@ -86,6 +94,10 @@ type Service interface {
 	PromoteSuggestion(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) (events.EventView, error)
 	// RejectSuggestion is rejectImportedEvent (ingest.suggestion.reject).
 	RejectSuggestion(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) error
+	// QuickImport is quickImportClubEvent (ingest.quick_import.run, BE-211):
+	// the club's post text and/or poster read into draft event fields; a
+	// preview, nothing is stored.
+	QuickImport(ctx context.Context, a authz.Actor, orgID uuid.UUID, in QuickImportInput) (QuickImportResult, error)
 
 	// AdminListSources is adminListIngestSources (ingest.source.list).
 	AdminListSources(ctx context.Context, a authz.Actor, q SourceQuery) (SourcePage, error)
@@ -139,6 +151,17 @@ type Config struct {
 	EventRetention       time.Duration // default of the imported_event policy
 	RunRetention         time.Duration // ingest_runs kept (operational)
 	ChildRetention       time.Duration // one-off sitemap pages kept after their fetch
+
+	// QuickImportImages: the quick import may send posters to the
+	// extractor (INGEST_QUICK_IMPORT_IMAGES: dev/staging on, prod off until
+	// the lawyer's review; the text, masked, is always read).
+	QuickImportImages bool
+	// QuickImportOrgHourly and QuickImportOrgDaily bound the quick imports
+	// of one club; QuickImportDailyBudget those of the whole platform (the
+	// language model's cost).
+	QuickImportOrgHourly   int
+	QuickImportOrgDaily    int
+	QuickImportDailyBudget int
 }
 
 func (c Config) withDefaults() Config {
@@ -172,6 +195,14 @@ func (c Config) withDefaults() Config {
 	if c.MinConfidence <= 0 {
 		c.MinConfidence = 0.6
 	}
+	defInt := func(n *int, v int) {
+		if *n <= 0 {
+			*n = v
+		}
+	}
+	defInt(&c.QuickImportOrgHourly, 20)
+	defInt(&c.QuickImportOrgDaily, 60)
+	defInt(&c.QuickImportDailyBudget, 1000)
 	return c
 }
 
@@ -202,6 +233,12 @@ type Deps struct {
 	EventRetention func(ctx context.Context) (time.Duration, error)
 	// Adapters replaces the built-in adapters (tests). nil → defaultAdapters.
 	Adapters map[AdapterName]SourceAdapter
+	// Files reads the quick import's posters (files' event_cover uploads).
+	// nil → a quick import with posters answers 503.
+	Files Files
+	// Limiter counts the quick import's limits and daily budget. nil → the
+	// quick import answers 503 (the budget fails closed).
+	Limiter Limiter
 }
 
 func (d Deps) validate() error {
@@ -263,6 +300,31 @@ type counters struct {
 	created, rejected                      atomic.Int64
 	zeroYieldAlarms, pausedByFailures      atomic.Int64
 	clubsCreated, clubsMatched, removalReq atomic.Int64
+	quickImports                           [len(allQuickOutcomes)]atomic.Int64
+	quickInputTokens, quickOutputTokens    atomic.Int64
+}
+
+// quickOutcome is the outcome of a quick import (koro_ingest_quick_imports_total).
+type quickOutcome string
+
+// Quick import outcomes.
+const (
+	quickOK          quickOutcome = "ok"           // at least one draft
+	quickEmpty       quickOutcome = "empty"        // an answer without a valid draft
+	quickUnreadable  quickOutcome = "unreadable"   // the model declined or gave no usable answer
+	quickFailed      quickOutcome = "failed"       // the extractor did not answer (503)
+	quickRateLimited quickOutcome = "rate_limited" // a club limit or the daily budget (429), or the limiter is down
+)
+
+// allQuickOutcomes fixes the metric label order.
+var allQuickOutcomes = [...]quickOutcome{quickOK, quickEmpty, quickUnreadable, quickFailed, quickRateLimited}
+
+func (c *counters) quick(o quickOutcome) {
+	for i, x := range allQuickOutcomes {
+		if x == o {
+			c.quickImports[i].Add(1)
+		}
+	}
 }
 
 // allOutcomes fixes the metric label order.
@@ -277,8 +339,10 @@ type Counter struct {
 }
 
 // Counters returns the module's counters (monotonic) for
-// koro_ingest_runs_total{outcome}, koro_ingest_tokens_total{kind},
-// koro_ingest_items_total{kind} and koro_ingest_alarms_total{reason}.
+// koro_ingest_runs_total{outcome}, koro_ingest_tokens_total{kind} (the
+// pipeline's input/output, the quick import's quick_import_input/output),
+// koro_ingest_items_total{kind}, koro_ingest_alarms_total{reason} and
+// koro_ingest_quick_imports_total{outcome}.
 func (m Module) Counters() []Counter {
 	if m.svc == nil {
 		return nil
@@ -288,8 +352,13 @@ func (m Module) Counters() []Counter {
 	for i, o := range allOutcomes {
 		out = append(out, Counter{"runs", string(o), c.runs[i].Load()})
 	}
+	for i, o := range allQuickOutcomes {
+		out = append(out, Counter{"quick_imports", string(o), c.quickImports[i].Load()})
+	}
 	return append(out,
 		Counter{"tokens", "input", c.inputTokens.Load()}, Counter{"tokens", "output", c.outputTokens.Load()},
+		Counter{"tokens", "quick_import_input", c.quickInputTokens.Load()},
+		Counter{"tokens", "quick_import_output", c.quickOutputTokens.Load()},
 		Counter{"items", "event_created", c.created.Load()}, Counter{"items", "event_rejected", c.rejected.Load()},
 		Counter{"items", "club_created", c.clubsCreated.Load()}, Counter{"items", "club_matched", c.clubsMatched.Load()},
 		Counter{"items", "removal_request", c.removalReq.Load()},

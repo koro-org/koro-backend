@@ -61,8 +61,23 @@ type Ingest struct {
 	// policy row wins, hooks.retention).
 	EventRetention time.Duration `env:"INGEST_EVENT_RETENTION" envDefault:"168h"`
 
+	// QuickImportImages decides whether the quick import (BE-211) sends a
+	// club's posters to the extractor: "auto" (dev and staging on, prod off
+	// until the lawyer's review: a poster cannot be masked, so its faces
+	// and names would leave the country), "enabled" or "disabled". The
+	// post text is always read, masked.
+	QuickImportImages string `env:"INGEST_QUICK_IMPORT_IMAGES" envDefault:"auto"`
+	// QuickImportOrgHourly and QuickImportOrgDaily bound one club's quick
+	// imports; QuickImportDailyBudget the whole platform's (the language
+	// model's cost; each call is one unit).
+	QuickImportOrgHourly   int `env:"INGEST_QUICK_IMPORT_ORG_HOURLY" envDefault:"20"`
+	QuickImportOrgDaily    int `env:"INGEST_QUICK_IMPORT_ORG_DAILY" envDefault:"60"`
+	QuickImportDailyBudget int `env:"INGEST_QUICK_IMPORT_DAILY_BUDGET" envDefault:"1000"`
+
 	// defaultOn is SourceDefault resolved for APP_ENV by validate.
 	defaultOn bool
+	// imagesOn is QuickImportImages resolved for APP_ENV by validate.
+	imagesOn bool
 }
 
 // Extractor names (INGEST_EXTRACTOR_PROVIDER).
@@ -80,6 +95,12 @@ func ExtractorProviders() []string { return []string{ExtractorFake, ExtractorCla
 // until the lawyer's review). The zero value (no configuration) is false.
 func (g Ingest) SourceDefaultEnabled() bool { return g.defaultOn }
 
+// QuickImportImagesEnabled is INGEST_QUICK_IMPORT_IMAGES resolved for
+// APP_ENV: the quick import reads posters (auto: dev and staging) or only
+// the post text (auto: prod, until the lawyer's review). The zero value
+// (no configuration) is false.
+func (g Ingest) QuickImportImagesEnabled() bool { return g.imagesOn }
+
 // UserAgent is the crawler's User-Agent.
 func (g Ingest) UserAgent() string {
 	if g.BotInfoURL == "" {
@@ -93,16 +114,12 @@ func (g *Ingest) validate(c Common) error {
 	if err := checkProvider(c, "INGEST_EXTRACTOR_PROVIDER", &g.ExtractorProvider, ExtractorProviders()); err != nil {
 		errs = append(errs, err)
 	}
-	g.SourceDefault = strings.ToLower(strings.TrimSpace(g.SourceDefault))
-	switch g.SourceDefault {
-	case "enabled":
-		g.defaultOn = true
-	case "disabled":
-		g.defaultOn = false
-	case "auto":
-		g.defaultOn = c.Env != EnvProd
-	default:
-		errs = append(errs, fmt.Errorf("INGEST_SOURCE_DEFAULT must be auto, enabled or disabled (got %q)", g.SourceDefault))
+	var err error
+	if g.defaultOn, err = autoSwitch(c, "INGEST_SOURCE_DEFAULT", &g.SourceDefault); err != nil {
+		errs = append(errs, err)
+	}
+	if g.imagesOn, err = autoSwitch(c, "INGEST_QUICK_IMPORT_IMAGES", &g.QuickImportImages); err != nil {
+		errs = append(errs, err)
 	}
 	if g.BotInfoURL != "" {
 		if u, err := url.Parse(g.BotInfoURL); err != nil || u.Scheme != "https" || u.Host == "" ||
@@ -142,6 +159,28 @@ func (g *Ingest) validate(c Common) error {
 		errs = append(errs, errors.New("INGEST_MIN_CONFIDENCE must be between 0 and 1"))
 	case g.ExtractorMaxTokens < 256 || g.ExtractorMaxTokens > 64000:
 		errs = append(errs, errors.New("INGEST_EXTRACTOR_MAX_TOKENS must be between 256 and 64000"))
+	case g.QuickImportOrgHourly < 1 || g.QuickImportOrgHourly > 1000:
+		errs = append(errs, errors.New("INGEST_QUICK_IMPORT_ORG_HOURLY must be between 1 and 1000"))
+	case g.QuickImportOrgDaily < g.QuickImportOrgHourly || g.QuickImportOrgDaily > 10000:
+		errs = append(errs, errors.New("INGEST_QUICK_IMPORT_ORG_DAILY must be between INGEST_QUICK_IMPORT_ORG_HOURLY and 10000"))
+	case g.QuickImportDailyBudget < 1 || g.QuickImportDailyBudget > 1000000:
+		errs = append(errs, errors.New("INGEST_QUICK_IMPORT_DAILY_BUDGET must be between 1 and 1000000"))
 	}
 	return errors.Join(errs...)
+}
+
+// autoSwitch resolves an auto|enabled|disabled setting for APP_ENV (auto:
+// on in dev and staging, off in prod, until the lawyer's review), lower
+// casing *v.
+func autoSwitch(c Common, key string, v *string) (bool, error) {
+	*v = strings.ToLower(strings.TrimSpace(*v))
+	switch *v {
+	case "enabled":
+		return true, nil
+	case "disabled":
+		return false, nil
+	case "auto":
+		return c.Env != EnvProd, nil
+	}
+	return false, fmt.Errorf("%s must be auto, enabled or disabled (got %q)", key, *v)
 }

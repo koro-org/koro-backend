@@ -22,6 +22,7 @@ import (
 	"koro/internal/platform/obs"
 	"koro/internal/platform/outbox"
 	"koro/internal/platform/queue"
+	"koro/internal/platform/ratelimit"
 )
 
 // env is the ingest module over its in-memory store, the real orgs and
@@ -40,6 +41,8 @@ type env struct {
 	domains *mailDomains
 	drafts  *fakeDrafts
 	sender  *fakeSender
+	files   *fakeFiles
+	limiter *ratelimit.Mem
 	svc     ingest.Service
 	mod     ingest.Module
 }
@@ -70,6 +73,9 @@ type scriptedExtractor struct {
 	calls  int
 	docs   [][]ingest.Document
 	script func(req ingest.ExtractRequest) (ingest.Extraction, error)
+	// drafts are the quick import requests; draftScript replaces the fake.
+	drafts      []ingest.DraftRequest
+	draftScript func(req ingest.DraftRequest) (ingest.DraftExtraction, error)
 }
 
 func (x *scriptedExtractor) Name() string { return "scripted" }
@@ -84,6 +90,18 @@ func (x *scriptedExtractor) Extract(ctx context.Context, req ingest.ExtractReque
 		return script(req)
 	}
 	return ingest.FakeExtractor{}.Extract(ctx, req)
+}
+
+func (x *scriptedExtractor) Draft(ctx context.Context, req ingest.DraftRequest) (ingest.DraftExtraction, error) {
+	x.mu.Lock()
+	x.calls++
+	x.drafts = append(x.drafts, req)
+	script := x.draftScript
+	x.mu.Unlock()
+	if script != nil {
+		return script(req)
+	}
+	return ingest.FakeExtractor{}.Draft(ctx, req)
 }
 
 func (x *scriptedExtractor) count() int {
@@ -126,7 +144,8 @@ func newEnv(t *testing.T, cfg ingest.Config) *env {
 	clk := clock.NewFake(t0)
 	log := obs.Discard()
 	e := &env{clk: clk, store: ingest.NewMemStore(clk.Now), fetch: ingest.NewMemFetcher(), ext: &scriptedExtractor{},
-		audit: &audittest.Recorder{}, orgsMem: orgs.NewMemStore(clk.Now), drafts: &fakeDrafts{}, sender: &fakeSender{}}
+		audit: &audittest.Recorder{}, orgsMem: orgs.NewMemStore(clk.Now), drafts: &fakeDrafts{}, sender: &fakeSender{},
+		files: newFakeFiles(), limiter: ratelimit.NewMem(clk)}
 	tx := db.NopTx{}
 	out := outbox.NewMem(clk)
 	idem := idempotency.New(idempotency.Deps{Tx: tx, Store: idempotency.NewMemStore(), Clock: clk, Log: log})
@@ -156,6 +175,7 @@ func newEnv(t *testing.T, cfg ingest.Config) *env {
 	mod, err := ingest.New(ingest.Deps{
 		Store: e.store, Tx: tx, Directory: e.domains, Orgs: e.orgs, Fetcher: e.fetch, Extractor: e.ext, Audit: e.audit,
 		Clock: clk, Log: log, Config: cfg, Idempotency: idem, Drafts: e.drafts, Sender: e.sender,
+		Files: e.files, Limiter: e.limiter,
 	})
 	if err != nil {
 		t.Fatal(err)

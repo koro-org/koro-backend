@@ -13497,6 +13497,121 @@ components:
         - kvkk_requests
         - student_documents
       type: object
+    QuickImportConfidenceDTO:
+      additionalProperties: false
+      properties:
+        category:
+          format: double
+          type: number
+        ends_at:
+          format: double
+          type: number
+        location:
+          format: double
+          type: number
+        starts_at:
+          format: double
+          type: number
+        summary:
+          format: double
+          type: number
+        title:
+          format: double
+          type: number
+      required:
+        - title
+        - starts_at
+        - ends_at
+        - location
+        - summary
+        - category
+      type: object
+    QuickImportDraftDTO:
+      additionalProperties: false
+      properties:
+        all_day:
+          description: "The post gives a date without a time: starts_at is the start of that day"
+          type: boolean
+        category:
+          enum:
+            - workshop
+            - talk
+            - competition
+            - career
+            - social
+            - trip
+            - sports
+            - culture
+            - volunteering
+            - other
+          type: string
+        confidence:
+          $ref: "#/components/schemas/QuickImportConfidenceDTO"
+        ends_at:
+          format: date-time
+          type: string
+        evidence:
+          description: "The words the draft was read from: a quote of the text, or the poster's words"
+          type: string
+        format:
+          enum:
+            - in_person
+            - online
+          type: string
+        location_name:
+          description: The place as the post writes it (at most 200 characters)
+          type: string
+        starts_at:
+          description: Europe/Istanbul; omitted when the post gives no usable date
+          format: date-time
+          type: string
+        summary:
+          description: One or two sentences (at most 300 characters); people only by role
+          type: string
+        title:
+          description: At most 160 characters; never a person's name
+          type: string
+        verified:
+          description: "evidence is a quote of the pasted text; false: read from the poster, check every field"
+          type: boolean
+      required:
+        - title
+        - all_day
+        - format
+        - category
+        - evidence
+        - verified
+        - confidence
+      type: object
+    QuickImportInputBody:
+      additionalProperties: false
+      properties:
+        file_ids:
+          description: "The posters: event_cover uploads of the club, scanned"
+          items:
+            type: string
+          maxItems: 3
+          type: array
+        text:
+          description: The post's text as pasted (line breaks kept)
+          maxLength: 5000
+          type: string
+      type: object
+    QuickImportResultDTO:
+      additionalProperties: false
+      properties:
+        drafts:
+          description: At most 5, usually one; empty when nothing could be read (type the event in)
+          items:
+            $ref: "#/components/schemas/QuickImportDraftDTO"
+          type: array
+        images_read:
+          description: "false with file_ids: this environment's extractor does not read images (development)"
+          type: boolean
+      required:
+        - drafts
+        - images_read
+      type: object
     QuoteOrderOutputBody:
       additionalProperties: false
       properties:
@@ -40370,6 +40485,49 @@ paths:
       x-koro-action: feed.post.list_org_manage
       x-koro-rate-limit: read_default
       x-koro-surface: org
+  /api/v1/orgs/{org_id}/quick-import:
+    post:
+      description: "The club's own announcement — the text of its post (an Instagram caption), its poster (an event_cover upload of the club: createUpload, completeUpload, then the scan) or both — read into the fields of createEvent with a confidence per field. Nothing is saved: check and correct the drafts, then create the event (a poster becomes its cover with cover_file_id; one never used is deleted with the other unused uploads). Personal data in the text is masked before it is read; posters are read only where this environment allows it (422 ingest.quick_import_images_off). Limited per club and per day (429 with Retry-After); a poster still being scanned is 409 files.not_clean (retry)."
+      operationId: quickImportClubEvent
+      parameters:
+        - in: path
+          name: org_id
+          required: true
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuickImportInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuickImportResultDTO"
+          description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Error
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Read the club's post or poster into draft event fields
+      tags:
+        - ingest
+      x-koro-action: ingest.quick_import.run
+      x-koro-idempotency: optional
+      x-koro-rate-limit: write_default
+      x-koro-surface: org
+      x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/refund-requests:
     get:
       description: "Newest first; filter by status, waiting ones (pending: open or in_review) or one order."

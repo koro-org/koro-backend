@@ -1,9 +1,11 @@
-# Authz matrix of the ingest module (03 §5.25, 04 §2.25 doc patches; BE-210). 17 operations × 18 personas.
+# Authz matrix of the ingest module (03 §5.25, 04 §2.25 doc patches; BE-210, BE-211). 18 operations × 18 personas.
 # The collected events are public (P): every persona — anonymous included — lists and reads them and may ask
 # that one be removed (202; it is hidden at once). The suggestions are the club's management surface (03 §3.6):
 # the club's club_admin lists, promotes (an ordinary draft, events.event.create) and rejects; a club member
 # without the role 403; everyone else 404; platform staff see the surface (403) and platform_admin lists it
-# (200) but never promotes or rejects for a club. Every other operation is the admin surface (03 §7.2-3):
+# (200) but never promotes or rejects for a club. The quick import (BE-211: the club's own post read into draft
+# fields, nothing stored) is the club_admin's alone, like createEvent: a member 403, everyone else 404, platform
+# staff 403 (platform_admin too). Every other operation is the admin surface (03 §7.2-3):
 # platform_admin only, 403 without the role. Another club's imported event on a club's path is 404 (06 H-38:
 # the scope comes from the row).
 version: 1
@@ -92,6 +94,20 @@ operations:
         path_params: { org_id: club_a, imported_event_id: ingest_event_b }
         expect: { anonymous: 401, club_admin: 404, club_member: 403, "@outsiders_a": 404, platform_admin: 403,
                   "@other_staff_ing": 403 }
+
+  quickImportClubEvent:
+    method: POST
+    path: /api/v1/orgs/{org_id}/quick-import
+    action: ingest.quick_import.run
+    path_params: { org_id: club_a }
+    body: bodies/ingest/quick_import.json
+    note: a preview (the fake extractor); nothing is stored, the club's hourly limit is far from the matrix's calls
+    expect: { anonymous: 401, club_admin: 200, club_member: 403, "@outsiders_a": 404, platform_admin: 403,
+              "@other_staff_ing": 403 }
+    variants:
+      - name: unknown_org
+        path_params: { org_id: "literal:00000000-0000-7000-8000-0000000000e4" }
+        expect: { anonymous: 401, "@no_platform_role_ing": 404, "@other_staff_ing": 404, platform_admin: 404 }
 
   adminListIngestSources:
     method: GET

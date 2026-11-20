@@ -948,6 +948,12 @@
     "type": "urn:koro:problem:ingest.not_found"
   },
   {
+    "code": "ingest.quick_import_images_off",
+    "status": 422,
+    "title": "Reading posters is turned off; paste the post text",
+    "type": "urn:koro:problem:ingest.quick_import_images_off"
+  },
+  {
     "code": "ingest.source_exists",
     "status": 409,
     "title": "A source with this URL exists",

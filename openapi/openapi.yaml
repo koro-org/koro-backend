@@ -23974,7 +23974,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/reactivate:
     post:
-      description: suspended → active, with re-authentication. A company's tax identifier rejection (company.tax_id_rejection_reason) ends with the suspension.
+      description: "suspended → active, with re-authentication. A company's tax identifier rejection (company.tax_id_rejection_reason) ends with the suspension. A platform admin who is a member of the org (any role) is a party: 403 forbidden, checked before the proof and the status (another platform admin decides)."
       operationId: adminReactivateOrg
       parameters:
         - description: Organization ID
@@ -24024,7 +24024,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/suspend:
     post:
-      description: active → suspended, with re-authentication.
+      description: "active → suspended, with re-authentication. A platform admin who is a member of the org (any role) is a party: 403 forbidden, checked before the proof and the status (another platform admin decides)."
       operationId: adminSuspendOrg
       parameters:
         - description: Organization ID
@@ -24184,7 +24184,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/admin/orgs/{org_id}/verify:
     post:
-      description: pending_review → active; another status is 409 orgs.invalid_state.
+      description: "pending_review → active; another status is 409 orgs.invalid_state. A platform admin who is a member of the org (any role) is a party: 403 forbidden, checked before the status (another platform admin decides)."
       operationId: adminVerifyOrg
       parameters:
         - description: Organization ID
@@ -36587,7 +36587,7 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/orgs/{org_id}/close:
     post:
-      description: Company owner or platform admin, with re-authentication. Open orders or payouts → 409 orgs.open_commerce. Every membership ends (org_closed).
+      description: "Company owner or platform admin, with re-authentication. Open orders or payouts → 409 orgs.open_commerce. Every membership ends (org_closed). Platform staff closing a pending_review org reject its registration (its owner withdraws it): the reason is kept for the founder's notice. A platform admin who is a member of the org (any role) is a party in a rejection: 403 forbidden, checked before the proof (another platform admin decides)."
       operationId: closeOrg
       parameters:
         - description: Organization ID

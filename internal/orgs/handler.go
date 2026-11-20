@@ -74,7 +74,9 @@ func Register(api huma.API, svc Service) {
 		OperationID: "closeOrg", Method: http.MethodPost, Path: "/orgs/{org_id}/close",
 		Summary: "Close an organization",
 		Description: "Company owner or platform admin, with re-authentication. Open orders or payouts → 409 " +
-			"orgs.open_commerce. Every membership ends (org_closed).",
+			"orgs.open_commerce. Every membership ends (org_closed). Platform staff closing a pending_review org reject " +
+			"its registration (its owner withdraws it): the reason is kept for the founder's notice. " +
+			party("org", "the proof", "a rejection"),
 	}, op.Meta{Action: string(authz.OrgsOrgClose), Surface: op.SurfaceOrg, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.closeOrg)
 
@@ -95,12 +97,15 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminVerifyOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/verify",
-		Summary: "Verify an organization", Description: "pending_review → active; another status is 409 orgs.invalid_state.",
+		Summary: "Verify an organization",
+		Description: "pending_review → active; another status is 409 orgs.invalid_state. " +
+			party("org", "the status", ""),
 	}, op.Meta{Action: string(authz.OrgsOrgVerify), Surface: op.SurfaceAdmin, Idempotency: op.IdempotencyOptional}, h.adminVerify)
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "adminSuspendOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/suspend",
-		Summary: "Suspend an organization", Description: "active → suspended, with re-authentication.",
+		Summary:     "Suspend an organization",
+		Description: "active → suspended, with re-authentication. " + party("org", "the proof and the status", ""),
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminSuspend)
 
@@ -108,7 +113,7 @@ func Register(api huma.API, svc Service) {
 		OperationID: "adminReactivateOrg", Method: http.MethodPost, Path: "/admin/orgs/{org_id}/reactivate",
 		Summary: "Reactivate a suspended organization",
 		Description: "suspended → active, with re-authentication. A company's tax identifier rejection " +
-			"(company.tax_id_rejection_reason) ends with the suspension.",
+			"(company.tax_id_rejection_reason) ends with the suspension. " + party("org", "the proof and the status", ""),
 	}, op.Meta{Action: string(authz.OrgsOrgSuspend), Surface: op.SurfaceAdmin, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.adminReactivate)
 
@@ -136,9 +141,21 @@ func Register(api huma.API, svc Service) {
 	registerMembers(api, h)
 }
 
+// party describes the party rule of a staff decision on an org (BE-208,
+// BE-212) for the operation descriptions: who is refused, what the refusal
+// comes before and, when the operation decides more than one thing, which
+// decision it binds ("" for all).
+func party(subject, before, decision string) string {
+	on := ""
+	if decision != "" {
+		on = " in " + decision
+	}
+	return "A platform admin who is a member of the " + subject + " (any role) is a party" + on + ": 403 forbidden, " +
+		"checked before " + before + " (another platform admin decides)."
+}
+
 // taxIDParty is the party rule of the tax identifier decisions (BE-208).
-const taxIDParty = "A platform admin who is a member of the company (any role) is a party: 403 forbidden, checked " +
-	"before the review, If-Match and the proof (another platform admin decides)."
+var taxIDParty = party("company", "the review, If-Match and the proof", "")
 
 type handler struct{ svc Service }
 

@@ -32,7 +32,8 @@ func TestWire_IdentityReauthDenied_OneRecordPerRefusal(t *testing.T) {
 		goodCur = `, "current_password": "` + matrixReauthPassword + `"`
 		badCur  = `, "current_password": "wrong-password-123"`
 	)
-	target := uuid.NewV7() // nothing reads it before the proof
+	target := uuid.NewV7()  // nothing reads it before the proof
+	company := uuid.NewV7() // suspend reads the org first (BE-212: the party rule), so its record is scoped to it
 	cases := []struct {
 		name         string
 		role         authz.PlatformRole
@@ -42,6 +43,7 @@ func TestWire_IdentityReauthDenied_OneRecordPerRefusal(t *testing.T) {
 		good, wrong  string
 		resType      string
 		resID        func(staff uuid.UUID) *uuid.UUID
+		org          *uuid.UUID // the denied record's org: only from a row read before the proof (06 H-38)
 		meta         map[string]any
 		setup        func(t *testing.T, e *reauthBudgetEnv)
 	}{
@@ -53,9 +55,11 @@ func TestWire_IdentityReauthDenied_OneRecordPerRefusal(t *testing.T) {
 			body: `{"user_id": "` + target.String() + `", "role": "moderator", "reason": "needs the role for the pilot"%s}`,
 			good: good, wrong: wrong, resType: "platform_role_assignment", meta: map[string]any{"step": "request"}},
 		{name: "orgs adminSuspendOrg over identity's Verify", role: authz.PlatformAdmin, action: authz.OrgsOrgSuspend,
-			method: http.MethodPost, path: "/api/v1/admin/orgs/" + target.String() + "/suspend",
+			method: http.MethodPost, path: "/api/v1/admin/orgs/" + company.String() + "/suspend",
 			body: `{"reason": "Kullanım koşulları ihlali"%s}`, good: good, wrong: wrong,
-			resType: authz.TypeOrg, resID: func(uuid.UUID) *uuid.UUID { return &target }, meta: map[string]any{"transition": "suspend"}},
+			resType: authz.TypeOrg, resID: func(uuid.UUID) *uuid.UUID { return &company }, org: &company,
+			meta:  map[string]any{"transition": "suspend"},
+			setup: func(t *testing.T, e *reauthBudgetEnv) { e.activeCompany(t, company) }},
 		{name: "payments adminCreateCollectionAccount over identity's Verify", role: authz.PlatformFinanceAdmin,
 			action: authz.PaymentsCollectionAccountCreate, method: http.MethodPost, path: "/api/v1/admin/collection-accounts",
 			body: `{"label": "Wire hesap", "legal_party_id": "` + wirePlatformParty.String() + `", "iban": "TR330006100519786457841326",
@@ -143,8 +147,9 @@ func TestWire_IdentityReauthDenied_OneRecordPerRefusal(t *testing.T) {
 					t.Fatalf("refusal %d: %s %s %q, want %s denied reauth_failed", i+1, r.Action, r.Outcome, r.Reason, tc.action)
 				case r.ActorUserID == nil || *r.ActorUserID != staff || r.ActorKind != "user":
 					t.Fatalf("refusal %d: actor %v (%s), want %s", i+1, r.ActorUserID, r.ActorKind, staff)
-				case r.ResourceType != tc.resType || !sameUUID(r.ResourceID, resID) || r.OrgID != nil:
-					t.Fatalf("refusal %d: resource %s %v org %v, want %s %v and no org", i+1, r.ResourceType, r.ResourceID, r.OrgID, tc.resType, resID)
+				case r.ResourceType != tc.resType || !sameUUID(r.ResourceID, resID) || !sameUUID(r.OrgID, tc.org):
+					t.Fatalf("refusal %d: resource %s %v org %v, want %s %v org %v", i+1, r.ResourceType, r.ResourceID, r.OrgID,
+						tc.resType, resID, tc.org)
 				case r.RequestID == "":
 					t.Fatalf("refusal %d: the denied record is not tied to its request", i+1)
 				case len(meta) != len(tc.meta) || (len(meta) > 0 && !reflect.DeepEqual(meta, tc.meta)):

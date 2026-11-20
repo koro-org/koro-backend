@@ -12,6 +12,7 @@ import (
 	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/identity"
+	"koro/internal/orgs"
 	"koro/internal/parties"
 	"koro/internal/platform/token"
 )
@@ -32,7 +33,8 @@ func TestWire_ReauthDenied_WrongProof403Denied_Overload503Nothing(t *testing.T) 
 	t.Parallel()
 	const wrong = `"reauth": {"password": "wrong-password-123"}`
 	const good = `"reauth": {"password": "` + matrixReauthPassword + `"}`
-	target := uuid.NewV7() // suspend and set_sensitivity check the proof before reading it
+	target := uuid.NewV7()  // set_sensitivity checks the proof before reading it
+	company := uuid.NewV7() // suspend reads the org first (BE-212: the party rule), so its row is scoped to it
 	cases := []struct {
 		name    string
 		role    authz.PlatformRole
@@ -42,12 +44,14 @@ func TestWire_ReauthDenied_WrongProof403Denied_Overload503Nothing(t *testing.T) 
 		body    string // %s: the reauth member
 		resType string
 		resID   *uuid.UUID
+		org     *uuid.UUID // the denied row's org: only from a row read before the proof (06 H-38)
 		meta    map[string]any
 		setup   func(t *testing.T, e *reauthBudgetEnv)
 	}{
 		{name: "orgs adminSuspendOrg", role: authz.PlatformAdmin, action: authz.OrgsOrgSuspend, method: http.MethodPost,
-			path: "/api/v1/admin/orgs/" + target.String() + "/suspend", body: `{"reason": "Kullanım koşulları ihlali", %s}`,
-			resType: authz.TypeOrg, resID: &target, meta: map[string]any{"transition": "suspend"}},
+			path: "/api/v1/admin/orgs/" + company.String() + "/suspend", body: `{"reason": "Kullanım koşulları ihlali", %s}`,
+			resType: authz.TypeOrg, resID: &company, org: &company, meta: map[string]any{"transition": "suspend"},
+			setup: func(t *testing.T, e *reauthBudgetEnv) { e.activeCompany(t, company) }},
 		{name: "directory adminSetClubSensitivity", role: authz.PlatformAdmin, action: authz.DirectoryClubSetSensitivity,
 			method: http.MethodPost, path: "/api/v1/admin/clubs/" + target.String() + "/sensitivity",
 			body:    `{"is_sensitive": true, "sensitive_reason": "political_opinion", %s}`,
@@ -118,8 +122,8 @@ func TestWire_ReauthDenied_WrongProof403Denied_Overload503Nothing(t *testing.T) 
 				t.Fatalf("outcome %q reason %q, want denied reauth_failed", r.Outcome, r.Reason)
 			case r.ActorUserID == nil || *r.ActorUserID != staff || r.ActorKind != "user":
 				t.Fatalf("actor %v (%s), want %s", r.ActorUserID, r.ActorKind, staff)
-			case r.ResourceType != tc.resType || !sameUUID(r.ResourceID, tc.resID) || r.OrgID != nil:
-				t.Fatalf("resource %s %v org %v, want %s %v and no org", r.ResourceType, r.ResourceID, r.OrgID, tc.resType, tc.resID)
+			case r.ResourceType != tc.resType || !sameUUID(r.ResourceID, tc.resID) || !sameUUID(r.OrgID, tc.org):
+				t.Fatalf("resource %s %v org %v, want %s %v org %v", r.ResourceType, r.ResourceID, r.OrgID, tc.resType, tc.resID, tc.org)
 			case r.RequestID == "":
 				t.Fatal("the denied row is not tied to its request (no request ID)")
 			case len(meta) != len(tc.meta) || (len(meta) > 0 && !reflect.DeepEqual(meta, tc.meta)):
@@ -132,6 +136,16 @@ func TestWire_ReauthDenied_WrongProof403Denied_Overload503Nothing(t *testing.T) 
 				t.Fatalf("ERROR logged: %s", out)
 			}
 		})
+	}
+}
+
+// activeCompany stores an active company with the ID id: an operation that
+// reads its org before the proof needs one to reach the proof.
+func (e *reauthBudgetEnv) activeCompany(t *testing.T, id uuid.UUID) {
+	t.Helper()
+	if _, _, err := e.c.orgs.store.InsertOrg(t.Context(), orgs.Org{ID: id, Kind: orgs.KindCompany, Name: "Askı Şirketi",
+		Slug: "aski-" + id.String()[:8], Status: orgs.StatusActive}); err != nil {
+		t.Fatal(err)
 	}
 }
 

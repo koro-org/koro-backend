@@ -230,13 +230,9 @@ func (s *service) reauth(ctx context.Context, a authz.Actor, proof reauthProof, 
 }
 
 // reauthDenied is the denied record of a refused proof of act on the org
-// id: the org scope only when the org row was read (06 H-38; suspend and
-// reactivate check the proof before reading). meta names the transition of
-// a shared action, never business data: nothing happened.
-func reauthDenied(act authz.Action, id uuid.UUID, read bool, meta map[string]any) audit.Event {
-	e := audit.Event{Action: string(act), ResourceType: resourceOrg, ResourceID: &id, Metadata: meta}
-	if read {
-		e.OrgID = &id
-	}
-	return e
+// id, scoped to it: every R operation reads the org row before the proof
+// (06 H-38; suspend and reactivate since the party rule, BE-212). meta names
+// the transition of a shared action, never business data: nothing happened.
+func reauthDenied(act authz.Action, id uuid.UUID, meta map[string]any) audit.Event {
+	return audit.Event{Action: string(act), OrgID: &id, ResourceType: resourceOrg, ResourceID: &id, Metadata: meta}
 }

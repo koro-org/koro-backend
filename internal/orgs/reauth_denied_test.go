@@ -16,10 +16,10 @@ import (
 // operation (orgs.org.suspend: suspend and reactivate, orgs.org.close,
 // orgs.ownership.transfer, orgs.org.update with a new tax identifier) audits a refused proof — wrong (403
 // identity.reauth_failed) or missing (403 identity.reauth_required) — as
-// one denied reauth_failed record of the org. Close and transfer read the
-// org first, so their record is scoped to it; suspend and reactivate check
-// the proof before reading, so theirs is not (06 H-38: never from the
-// request) and names the transition only. Nothing is written when identity
+// one denied reauth_failed record of the org, scoped to it: every one reads
+// the org before the proof (06 H-38: never from the request; suspend and
+// reactivate since their party rule, BE-212, and their record names the
+// transition only). Nothing is written when identity
 // cannot answer within the request budget (the bare deadline, httpx 503);
 // the right proof goes through afterwards. Before BE-074 the refusal went
 // back without a record.
@@ -49,7 +49,7 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 					_, err := e.svc.AdminSuspendOrg(ctx, a, id, "Şikâyet incelemesi", p)
 					return err
 				},
-				denied: audit.Event{ResourceID: &id, Metadata: map[string]any{"transition": "suspend"}}}
+				denied: audit.Event{ResourceID: &id, OrgID: &id, Metadata: map[string]any{"transition": "suspend"}}}
 		}},
 		{name: "reactivateOrg", action: authz.OrgsOrgSuspend, setup: func(t *testing.T, e *env) op {
 			id := verified(t, e)
@@ -61,7 +61,7 @@ func TestReauthDenied_EveryROperation(t *testing.T) {
 					_, err := e.svc.AdminReactivateOrg(ctx, a, id, "İnceleme bitti", p)
 					return err
 				},
-				denied: audit.Event{ResourceID: &id, Metadata: map[string]any{"transition": "reactivate"}}}
+				denied: audit.Event{ResourceID: &id, OrgID: &id, Metadata: map[string]any{"transition": "reactivate"}}}
 		}},
 		{name: "closeOrg", action: authz.OrgsOrgClose, setup: func(t *testing.T, e *env) op {
 			v, owner := e.company(t, "Kapanacak Şirket")

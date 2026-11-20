@@ -83,6 +83,10 @@ func TestOrgsPolicy_Matrix(t *testing.T) {
 			map[string]error{"platform_admin": nil}, fb},
 		{"suspend company_a (the org decided on)", authz.OrgsOrgSuspend, orgRes("company_a", authz.OrgCompany, "suspended"),
 			map[string]error{"platform_admin": nil}, fb},
+		{"verify company_a's registration (BE-212)", authz.OrgsOrgVerify, orgRes("company_a", authz.OrgCompany, "pending_review"),
+			map[string]error{"platform_admin": nil}, fb},
+		{"suspend company_a (BE-212)", authz.OrgsOrgSuspend, orgRes("company_a", authz.OrgCompany, "active"),
+			map[string]error{"platform_admin": nil}, fb},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -99,11 +103,14 @@ func TestOrgsPolicy_Matrix(t *testing.T) {
 	}
 }
 
-// TestOrgsPolicy_PartyDecidesNothing (BE-208, Q-63): on the org decided on,
-// a platform admin who is a member of it (any role) gets no grant for
-// orgs.org.verify and orgs.org.suspend (403); a membership elsewhere changes
-// nothing, nor does the admin surface (it names no org). BE-183/BE-194's
-// rule for the moderators is the same helper (feed.org.moderate).
+// TestOrgsPolicy_PartyDecidesNothing (BE-208, Q-63; BE-212, Q-65): on the
+// org decided on, whatever its status (a pending_review company's
+// registration, an active one's suspension, a suspended one's
+// reactivation), a platform admin who is a member of it (any role) gets no
+// grant for orgs.org.verify and orgs.org.suspend (403); a membership
+// elsewhere changes nothing, nor does the admin surface (it names no org).
+// BE-183/BE-194's rule for the moderators is the same helper
+// (feed.org.moderate).
 func TestOrgsPolicy_PartyDecidesNothing(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -114,7 +121,7 @@ func TestOrgsPolicy_PartyDecidesNothing(t *testing.T) {
 	}
 	pad := persona(t, "platform_admin")
 	for _, act := range []authz.Action{authz.OrgsOrgVerify, authz.OrgsOrgSuspend} {
-		for _, status := range []string{"active", "suspended"} {
+		for _, status := range []string{"pending_review", "active", "suspended"} {
 			r := orgRes("company_a", authz.OrgCompany, status)
 			wantErr(t, authz.Can(ctx, pad, act, r), nil, false)
 			for _, role := range []authz.MemberRole{authz.MemberRecruiter, authz.MemberCompanyAdmin, authz.MemberCompanyOwner} {

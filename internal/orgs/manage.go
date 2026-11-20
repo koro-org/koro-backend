@@ -182,7 +182,7 @@ func (s *service) taxChangeProof(ctx context.Context, a authz.Actor, id uuid.UUI
 	if err != nil || !newTax {
 		return "", err
 	}
-	return s.reauth(ctx, a, p.Proof, reauthDenied(authz.OrgsOrgUpdate, o.ID, true, map[string]any{"fields": []string{"tax_id"}}))
+	return s.reauth(ctx, a, p.Proof, reauthDenied(authz.OrgsOrgUpdate, o.ID, map[string]any{"fields": []string{"tax_id"}}))
 }
 
 // taxChange reports whether p replaces the tax identifier on file of a company
@@ -438,12 +438,16 @@ func (s *service) openCommerce() []OpenCommerceCheck {
 	return s.d.OpenCommerce()
 }
 
-// CloseOrg implements Service: authz (404/403) → reason → re-authentication
-// → in one transaction: status rules, the open-commerce checks, closed +
-// closed_at, every open membership ended (org_closed), audit. Closing a
-// pending_review org as platform staff rejects its registration (BE-144):
-// the reason is kept (rejection_reason) and org.review_decided (rejected)
-// tells the founder.
+// CloseOrg implements Service: authz (404/403) → reason → the party rule of
+// a rejection (403) → re-authentication → in one transaction: status rules,
+// the open-commerce checks, closed + closed_at, every open membership ended
+// (org_closed), audit. Closing a pending_review org as platform staff
+// rejects its registration (BE-144): the reason is kept (rejection_reason)
+// and org.review_decided (rejected) tells the founder. The rejection decides
+// the review adminVerifyOrg approves, so its party rule is the approval's
+// (orgs.org.verify on the org, BE-212): a platform admin who is a member of
+// the org is refused before the proof; its owner withdrawing it is no
+// rejection.
 func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof reauthProof) (OrgView, error) {
 	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
@@ -456,7 +460,13 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 	if err != nil {
 		return OrgView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOrgClose, o.ID, true, nil))
+	if rejection(a, o) {
+		meta := map[string]any{"review_outcome": domainevent.OrgReviewRejected}
+		if err := s.canDecide(ctx, a, authz.OrgsOrgVerify, o, meta); err != nil {
+			return OrgView{}, err
+		}
+	}
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOrgClose, o.ID, nil))
 	if err != nil {
 		return OrgView{}, err
 	}
@@ -558,7 +568,7 @@ func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newO
 	if newOwner == uuid.Nil() {
 		return OrgView{}, problem.Field("body.new_owner_user_id", "is required")
 	}
-	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOwnershipTransfer, o.ID, true, nil))
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOwnershipTransfer, o.ID, nil))
 	if err != nil {
 		return OrgView{}, err
 	}

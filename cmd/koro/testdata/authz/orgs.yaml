@@ -194,6 +194,10 @@ operations:
     action: orgs.org.close
     path_params: { org_id: company_a }
     body: bodies/orgs/close.json
+    note: >-
+      Party rule (BE-212): platform staff closing a pending_review org reject its registration, refused (403) to a
+      platform_admin who is a member of it; no persona is both and company_a is active, so
+      TestOrgReview_PartyCannotDecide pins it
     expect:
       anonymous: 401
       "@outsiders_company_a": 404
@@ -261,6 +265,9 @@ operations:
     action: orgs.org.verify
     path_params: { org_id: company_pending }
     body: bodies/orgs/verify.json
+    note: >-
+      Party rule (BE-212, Q-65): a platform_admin who is a member of the company is 403 (before the status); no
+      persona is both, so TestOrgReview_PartyCannotDecide and TestOrgsPolicy_PartyDecidesNothing pin it
     expect:
       anonymous: 401
       "@no_platform_role": 403
@@ -281,6 +288,9 @@ operations:
     action: orgs.org.suspend
     path_params: { org_id: company_a }
     body: bodies/orgs/suspend.json
+    note: >-
+      R; party rule (BE-212): a platform_admin who is a member of the company is 403 (before the proof); no persona
+      is both, so TestOrgSuspension_PartyCannotDecide and TestOrgsPolicy_PartyDecidesNothing pin it
     expect:
       anonymous: 401
       "@no_platform_role": 403
@@ -293,6 +303,7 @@ operations:
     action: orgs.org.suspend
     path_params: { org_id: company_suspended }
     body: bodies/orgs/reactivate.json
+    note: R; the party rule as adminSuspendOrg (BE-212, Q-65)
     expect:
       anonymous: 401
       "@no_platform_role": 403

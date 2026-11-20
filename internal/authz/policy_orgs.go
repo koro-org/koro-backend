@@ -29,12 +29,14 @@ const TypeOrgCatalog = "org_catalog"
 // surface (03 §3.6, §7.6): visible to its active members (403 without the
 // role) and to every platform role; anyone else gets 404.
 //
-// The party rule (BE-208, Q-63; BE-183/BE-194's for the moderators): the
-// decision on a company's new tax identifier authorises twice, first the
-// admin surface (403 before anything is read), then the org decided on (an
-// org resource): a platform admin who is a member of the org, any role, gets
-// no grant (403). Only the tax identifier review asks the second question
-// today (adminApproveTaxIdChange, adminRejectTaxIdChange).
+// The party rule (BE-208, Q-63; BE-212, Q-65; BE-183/BE-194's for the
+// moderators): a staff decision on an org authorises twice, first the admin
+// surface (403 before anything is read), then the org decided on (an org
+// resource): a platform admin who is a member of the org, any role, gets no
+// grant (403). Every decision of the two actions asks it: orgs.org.verify
+// (adminVerifyOrg, adminApproveTaxIdChange, and the registration's rejection
+// by closeOrg: it decides the same review) and orgs.org.suspend
+// (adminSuspendOrg, adminReactivateOrg, adminRejectTaxIdChange).
 //
 // k-cmp (BE-017 reading of 03 §5.2 orgs.company.create): the usr column is
 // an account with no student verification and no platform role (platform

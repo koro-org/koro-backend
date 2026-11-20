@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/notify"
 	"koro/internal/platform/domainevent"
@@ -42,7 +41,9 @@ import (
 // suspension it explains lasts; reactivating, correcting the identifier or
 // closing the company clears it. And the party rule: a platform admin who is
 // a member of the company (any role) decides on neither (authz: the org
-// resource of orgs.org.verify / orgs.org.suspend), 403 recorded as denied.
+// resource of orgs.org.verify / orgs.org.suspend), 403 recorded as denied;
+// BE-212 extended it to the org's other staff decisions (admin.go,
+// canDecide).
 
 // The tax_id_review values of the audit metadata.
 const (
@@ -76,7 +77,7 @@ func (s *service) AdminApproveTaxIDChange(ctx context.Context, a authz.Actor, id
 	if err != nil {
 		return OrgView{}, err
 	}
-	if err := s.canDecideTaxID(ctx, a, authz.OrgsOrgVerify, o, taxReviewApproved); err != nil {
+	if err := s.canDecide(ctx, a, authz.OrgsOrgVerify, o, map[string]any{"tax_id_review": taxReviewApproved}); err != nil {
 		return OrgView{}, err
 	}
 	return s.decideTaxID(ctx, a, id, ifMatch, taxDecision{
@@ -106,13 +107,13 @@ func (s *service) AdminRejectTaxIDChange(ctx context.Context, a authz.Actor, id 
 	if err != nil {
 		return OrgView{}, err
 	}
-	if err := s.canDecideTaxID(ctx, a, authz.OrgsOrgSuspend, o, taxReviewRejected); err != nil {
+	if err := s.canDecide(ctx, a, authz.OrgsOrgSuspend, o, map[string]any{"tax_id_review": taxReviewRejected}); err != nil {
 		return OrgView{}, err
 	}
 	if _, err := s.pendingTaxReview(ctx, o, ifMatch); err != nil {
 		return OrgView{}, err
 	}
-	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOrgSuspend, o.ID, true,
+	kind, err := s.reauth(ctx, a, proof, reauthDenied(authz.OrgsOrgSuspend, o.ID,
 		map[string]any{"tax_id_review": taxReviewRejected}))
 	if err != nil {
 		return OrgView{}, err
@@ -130,32 +131,6 @@ type taxDecision struct {
 	event   string // the org.review_decided outcome
 	reason  string // the audit reason: the approval's note, the rejection's reason (the company's too, BE-208)
 	reauth  string // "" without re-authentication
-}
-
-// reasonOrgMember is the Reason of the denied record of the party rule
-// (BE-208): the decider is a member of the org decided on.
-const reasonOrgMember = "org_member"
-
-// canDecideTaxID is the party rule of a decision on o's new tax identifier
-// (BE-208, Q-63; authz: the org resource of act). A platform admin who is a
-// member of o (any role) is refused 403, recorded as denied in its own
-// transaction (the refusal must stay on record) with o's scope: o was read
-// (06 H-38). The metadata names the decision refused, never a number.
-func (s *service) canDecideTaxID(ctx context.Context, a authz.Actor, act authz.Action, o Org, outcome string) error {
-	err := authz.Can(ctx, a, act, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)))
-	if err == nil || !errors.Is(err, authz.ErrForbidden) {
-		return err
-	}
-	id := o.ID
-	if lerr := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		return s.d.Audit.Log(ctx, audit.Event{
-			Action: string(act), Outcome: audit.Denied, OrgID: &id, ResourceType: resourceOrg, ResourceID: &id,
-			Reason: reasonOrgMember, Metadata: map[string]any{"tax_id_review": outcome},
-		}.By(a))
-	}); lerr != nil {
-		return lerr
-	}
-	return err
 }
 
 // decideTaxID writes a decision in one transaction (idempotency.Do: a

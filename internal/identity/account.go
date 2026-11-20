@@ -306,7 +306,7 @@ func (s *service) ConfirmPasswordReset(ctx context.Context, a authz.Actor, raw, 
 
 // ConfirmEmail implements Service (confirmEmail): the account_email token
 // activates a pending_email account (a verified one just consumes it). The
-// first token of a student's .edu.tr registration also verifies the
+// first token of a student's registration also verifies the
 // student in the same transaction (BE-097, edu_signup.go).
 func (s *service) ConfirmEmail(ctx context.Context, a authz.Actor, raw string) error {
 	if err := authz.Can(ctx, a, authz.IdentityEmailVerify, publicUser); err != nil {

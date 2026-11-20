@@ -10,7 +10,7 @@ import (
 
 // Student verification at sign-up (BE-097, koro-mobile B-06).
 //
-// A student who registers with a .edu.tr address proves that address once:
+// A student who registers with a university address proves that address once:
 // the account_email token of the registration also completes the student
 // verification of 01 §4.6 when it is confirmed. There is no second e-mail
 // and no second token; the rules are those of confirmEduVerification
@@ -29,6 +29,10 @@ import (
 //   - The university is resolved when the token is confirmed (the directory
 //     list of the moment, like confirmEduVerification); registration does
 //     no lookup, so its answer and cost stay the same for every address.
+//     So every student account's first token carries its address (BE-220:
+//     a university domain is not recognisable by its shape, sabanciuniv.edu
+//     is one); an address whose domain the directory does not list verifies
+//     the account alone (audit edu=domain_unknown).
 //   - The student verification is written only when the confirmation
 //     activates the account (pending_email → active), in the same
 //     transaction. When the domain is not a known university, or the
@@ -43,7 +47,7 @@ const (
 )
 
 // signupEduTarget is the target_email of the first account_email token of
-// a new account: a student's .edu.tr address, "" for everybody else.
+// a new account: a student's address, "" for everybody else.
 func signupEduTarget(u User) string {
 	if u.Persona != PersonaStudent {
 		return ""
@@ -68,7 +72,7 @@ func (s *service) signupEduOf(ctx context.Context, a authz.Actor, t EmailToken, 
 	if t.TargetEmail == "" || u.Status != StatusPendingEmail {
 		return signupEdu{}, nil
 	}
-	// A target that is no longer this student's .edu.tr address, or a
+	// A target that is no longer this student's address, or a
 	// caller the student confirmation refuses, verifies the account alone.
 	addr, ok := signupAddress(t, u)
 	if !ok || !eduConfirmAllowed(ctx, a) {
@@ -91,7 +95,7 @@ func eduConfirmAllowed(ctx context.Context, a authz.Actor) bool {
 	return authz.Can(ctx, a, authz.IdentityEduVerificationConfirm, publicUser) == nil
 }
 
-// signupAddress is the student .edu.tr address token t proves for account
+// signupAddress is the student address token t proves for account
 // u: its target, when u is a student whose address it still is.
 func signupAddress(t EmailToken, u User) (eduAddress, bool) {
 	email, normalized, domain, err := parseEduEmail(t.TargetEmail, "body.token")

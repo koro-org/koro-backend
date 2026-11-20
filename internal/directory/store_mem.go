@@ -24,7 +24,6 @@ import (
 var errCheck = problem.ErrValidation.Wrap(errors.New("directory: check constraint violated"))
 
 var (
-	domainRe    = regexp.MustCompile(`^([a-z0-9-]+\.)+edu\.tr$`)
 	skillSlugRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	websiteRe   = regexp.MustCompile(`^https?://`)
 )
@@ -274,7 +273,7 @@ func (s *MemStore) ListUniversities(_ context.Context, f UniversityFilter, after
 // ---- e-mail domains
 
 func checkDomain(d EmailDomain) error {
-	if !domainRe.MatchString(d.Domain) || !d.DomainKind.Valid() {
+	if len(d.Domain) > maxDomainLen || !domainRe.MatchString(d.Domain) || !d.DomainKind.Valid() {
 		return errCheck
 	}
 	return nil

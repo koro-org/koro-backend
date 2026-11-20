@@ -16271,7 +16271,7 @@ components:
           format: date
           type: string
         edu_email:
-          description: A .edu.tr address of the caller's university
+          description: An address of the caller's university at a domain the directory lists (usually .edu.tr)
           maxLength: 254
           type: string
       required:
@@ -27936,7 +27936,7 @@ paths:
       x-koro-surface: admin
   /api/v1/admin/universities/{university_id}/email-domains/{domain}:
     put:
-      description: A .edu.tr domain; a domain of another university is 409 directory.domain_taken.
+      description: The domain proves a student of this university (student verification, longest match). Usually a .edu.tr domain; another official domain of the university (e.g. sabanciuniv.edu) is accepted too, but never a public suffix (edu.tr, com.tr) or a shared mail service (gmail.com, outlook.com). A domain of another university is 409 directory.domain_taken.
       operationId: adminPutUniversityEmailDomain
       parameters:
         - description: University ID
@@ -27947,12 +27947,12 @@ paths:
             description: University ID
             format: uuid
             type: string
-        - description: A .edu.tr domain, e.g. itu.edu.tr
+        - description: An e-mail domain of the university, e.g. itu.edu.tr or sabanciuniv.edu
           in: path
           name: domain
           required: true
           schema:
-            description: A .edu.tr domain, e.g. itu.edu.tr
+            description: An e-mail domain of the university, e.g. itu.edu.tr or sabanciuniv.edu
             maxLength: 253
             type: string
       requestBody:
@@ -28518,7 +28518,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
           description: Error
-      summary: Confirm a .edu.tr address
+      summary: Confirm a university e-mail address
       tags:
         - identity
       x-koro-action: identity.edu_verification.confirm
@@ -33126,7 +33126,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/edu-verification:
     get:
-      description: The .edu.tr address is masked (a***@ogr.x.edu.tr).
+      description: The university address is masked (a***@ogr.x.edu.tr).
       operationId: getMyEduVerification
       responses:
         "200":
@@ -33154,7 +33154,7 @@ paths:
       x-koro-surface: self
   /api/v1/me/edu-verifications:
     post:
-      description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
+      description: "A single-use link (valid 24 hours) goes to the address. The domain must be one the directory lists for a university (usually .edu.tr; another official domain such as sabanciuniv.edu when listed). 202 whether or not the address is free: an address that verifies another account gets nothing (no enumeration). An address whose domain is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one keeps it and the field is ignored. Past the address and domain checks and the rate limits, every answer takes at least 0.5 s (BE-200)."
       operationId: startEduVerification
       requestBody:
         content:
@@ -33180,7 +33180,7 @@ paths:
       security:
         - sessionCookie: []
         - bearerAuth: []
-      summary: Verify (or renew) my student status with a .edu.tr address
+      summary: Verify (or renew) my student status with a university e-mail address
       tags:
         - identity
       x-koro-action: identity.edu_verification.start
@@ -33190,7 +33190,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/me/edu-verifications/document:
     post:
-      description: For students without a .edu.tr address (open education). document_file_id is a completed edu_document upload of the caller (createUpload). The document waits for platform staff; one at a time (409 identity.edu_verification_pending). birth_date as in startEduVerification.
+      description: For students without an address at a listed university domain (open education). document_file_id is a completed edu_document upload of the caller (createUpload). The document waits for platform staff; one at a time (409 identity.edu_verification_pending). birth_date as in startEduVerification.
       operationId: submitEduDocument
       requestBody:
         content:

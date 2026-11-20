@@ -28,7 +28,8 @@
 //   - A platform role is in effect only while its assignment is active or
 //     revoke_pending (06 H-33): a pending request grants nothing.
 //   - A student is a user whose active education is verified (BE-018):
-//     by a single-use link to a .edu.tr address of a known university, or
+//     by a single-use link to an address at a domain the directory lists
+//     for a university (.edu.tr or another official domain, BE-220), or
 //     by a student document a platform admin approved (never their own).
 //     A verification lasts a year; identity.edu_expire lapses it.
 //   - The terms of use in force must be accepted before any write the HTTP
@@ -364,8 +365,9 @@ type Deps struct {
 	Secrets    SecretBox
 	Challenges ChallengeStore
 
-	// Student verification (BE-018). Domains resolves .edu.tr domains
-	// (hooks.domainResolver); nil → every domain is unknown (422
+	// Student verification (BE-018). Domains resolves university domains
+	// (hooks.domainResolver: the directory's allow-list; BE-220 not only
+	// .edu.tr); nil → every domain is unknown (422
 	// identity.edu_domain_unknown: the document path stays open). Files
 	// holds student documents and deletes them on erasure, after a virus
 	// finding and at the end of their retention; nil → the document

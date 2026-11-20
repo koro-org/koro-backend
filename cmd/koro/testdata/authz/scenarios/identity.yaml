@@ -142,7 +142,7 @@ scenarios:
       - { persona: platform_admin, operation: adminGetEduDocument, path_params: { verification_id: edu_pending_pad }, expect: 403, code: forbidden }
       - { persona: support, operation: adminDecideEduVerification, path_params: { verification_id: edu_pending_pad }, expect: 200 }
   edu_unknown_domain:
-    note: "BE-018: an unknown .edu.tr domain is 422 (document path); a known one starts the verification"
+    note: "BE-018, BE-220: a domain the directory does not list (.edu.tr or not) is 422 (document path); a listed one starts the verification"
     steps:
       - { persona: user_unverified, operation: startEduVerification, body: bodies/identity/edu_start_unknown.json, expect: 422, code: identity.edu_domain_unknown }
       - { persona: user_unverified, operation: startEduVerification, expect: 202 }

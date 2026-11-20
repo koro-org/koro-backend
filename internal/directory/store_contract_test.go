@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -198,9 +199,14 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 			IsActive: true}); !errors.Is(err, directory.ErrDomainTaken) {
 			t.Fatalf("duplicate domain: %v", err)
 		}
-		if _, err := s.InsertDomain(ctx, directory.EmailDomain{Domain: "a.example.com", UniversityID: a.ID,
-			DomainKind: directory.DomainMixed, IsActive: true}); !isStatus(err, 422) {
-			t.Fatalf("non .edu.tr domain: %v", err)
+		// The shape CHECK (000190): lower-case ASCII labels, an alphabetic
+		// top-level label, at most 253 characters.
+		for _, bad := range []string{"A.edu.tr", "a_b.edu.tr", "a.edu.t", "a.edu.tr1", "a.edu.tr.", "tr", "ada@a.edu.tr",
+			strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 55) + ".edu.tr"} {
+			if _, err := s.InsertDomain(ctx, directory.EmailDomain{Domain: bad, UniversityID: a.ID,
+				DomainKind: directory.DomainMixed, IsActive: true}); !isStatus(err, 422) {
+				t.Fatalf("malformed domain %q: %v", bad, err)
+			}
 		}
 		if _, err := s.InsertDomain(ctx, directory.EmailDomain{Domain: "ogr.a.edu.tr", UniversityID: b.ID,
 			DomainKind: directory.DomainStudent, IsActive: true}); err != nil {
@@ -256,6 +262,27 @@ func storeContract(t *testing.T, newStore func(t *testing.T) (directory.Store, w
 		}
 		if got := domains(uuid.NewV7()); len(got) != 0 {
 			t.Fatalf("DomainsOf(unknown) = %v", got)
+		}
+	})
+
+	t.Run("domains outside .edu.tr (BE-220)", func(t *testing.T) {
+		t.Parallel()
+		s, w := newStore(t)
+		ctx := t.Context()
+		a := uni(t, s, w, "Kanca Üniversitesi", "İstanbul")
+		for _, d := range []string{"kancauniv.edu", "kancaedu.net"} {
+			if _, err := s.InsertDomain(ctx, directory.EmailDomain{Domain: d, UniversityID: a.ID, DomainKind: directory.DomainMixed,
+				IsActive: true}); err != nil {
+				t.Fatalf("InsertDomain(%s) = %v", d, err)
+			}
+		}
+		for _, c := range [][]string{{"ogr.kancauniv.edu", "kancauniv.edu", "edu"}, {"kancaedu.net", "net"}} {
+			if m, err := s.MatchDomain(ctx, c); err != nil || m.Domain != c[len(c)-2] || m.UniversityID != a.ID {
+				t.Fatalf("MatchDomain(%v) = %+v, %v", c, m, err)
+			}
+		}
+		if _, err := s.MatchDomain(ctx, []string{"kancauniv.edu.example.test", "edu.example.test", "example.test", "test"}); !errors.Is(err, directory.ErrNotFound) {
+			t.Fatalf("a listed domain matched without being a candidate: %v", err)
 		}
 	})
 

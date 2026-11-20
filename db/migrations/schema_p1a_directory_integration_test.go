@@ -3,6 +3,7 @@
 package migrations_test
 
 import (
+	"strings"
 	"testing"
 	"uuid"
 
@@ -51,19 +52,26 @@ func TestSchema_UniversityConstraints(t *testing.T) {
 }
 
 // TestSchema_UniversityEmailDomainConstraints covers university_email_domains
-// (02 §8.2): only well-formed lower-case .edu.tr domains.
+// (02 §8.2): only well-formed lower-case domains. Since 000190 (BE-220) the
+// CHECK keeps the shape only (sabanciuniv.edu, bilgiedu.net pass); which
+// domains may be stored (no public suffix, no shared mail service) is
+// directory's domainRule.
 func TestSchema_UniversityEmailDomainConstraints(t *testing.T) {
 	t.Parallel()
 	w := newP1aWorld(t)
 	uni, _ := w.university()
 	admin := w.user()
 	const cols = `INSERT INTO university_email_domains (domain, university_id, domain_kind, verified_by) VALUES `
-	for _, domain := range []string{"itu.edu.tr", "ogr.itu.edu.tr", "cs-dept.ogr.itu.edu.tr", "boun.edu.tr"} {
+	for _, domain := range []string{
+		"itu.edu.tr", "ogr.itu.edu.tr", "cs-dept.ogr.itu.edu.tr", "boun.edu.tr", "sabanciuniv.edu", "su.sabanciuniv.edu", "bilgiedu.net",
+		strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 54) + ".edu.tr", // 253
+	} {
 		expectOK(t, w.d.Pool, []p1aCase{{"domain " + domain, cols + `($1, $2, 'mixed', $3)`, []any{domain, uni, admin}, "", ""}})
 	}
 	var bad []p1aCase
 	for _, domain := range []string{
-		"edu.tr", "itu.edu.tr.evil.com", "ITU.edu.tr", "itu.com.tr", "itu.edu.trx", "https://itu.edu.tr", "a b.edu.tr", ".itu.edu.tr", "itu..edu.tr", "itü.edu.tr", "",
+		"tr", "itu", "ITU.edu.tr", "itu.edu.t", "itu.edu.tr1", "itu.edu.tr.", "https://itu.edu.tr", "a b.edu.tr", ".itu.edu.tr", "itu..edu.tr",
+		"itü.edu.tr", "ada@itu.edu.tr", "", strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." + strings.Repeat("d", 55) + ".edu.tr", // 254
 	} {
 		bad = append(bad, p1aCase{"domain " + domain, cols + `($1, $2, 'mixed', NULL)`, []any{domain, uni}, db.CodeCheckViolation, "university_email_domains_domain_chk"})
 	}

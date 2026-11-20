@@ -198,7 +198,7 @@ func (s *service) Register(ctx context.Context, a authz.Actor, in Registration) 
 				return err
 			}
 		}
-		// BE-097: a student's .edu.tr address is proven for the student
+		// BE-097: a student's address is proven for the student
 		// verification by this first token too (edu_signup.go).
 		if _, err := s.issueToken(ctx, u, PurposeAccountEmail, signupEduTarget(u)); err != nil {
 			return err

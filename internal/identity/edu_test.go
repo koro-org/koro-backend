@@ -184,7 +184,12 @@ func TestStartEdu_UnknownDomain_422(t *testing.T) {
 	t.Parallel()
 	e := newEduEnv(t)
 	_, a := e.student(t, "ada@example.com")
-	for _, addr := range []string{"ada@bilinmeyen.edu.tr", "ada@gmail.com", "ada@edu.tr", "ada@uni.edu.tr.evil.com"} {
+	// The domain decides nothing by its shape (BE-220): an unlisted .edu.tr
+	// domain is unknown, an unlisted non-.edu.tr one too. One account per
+	// address: the per-user rate limit is not what this test is about.
+	for i, addr := range []string{"ada@bilinmeyen.edu.tr", "ada@gmail.com", "ada@edu.tr", "ada@uni.edu.tr.evil.com",
+		"ada@kancauniv.edu", "ada@xuni.edu.tr", "ada@ünı.edu.tr"} {
+		_, a := e.student(t, "unknown"+strconv.Itoa(i)+"@example.com")
 		err := e.svc.StartEduVerification(t.Context(), a, identity.EduStart{Email: addr})
 		problemtest.WantErr(t, err, identity.ErrEduDomainUnknown)
 		wantStatus(t, err, http.StatusUnprocessableEntity)
@@ -226,6 +231,45 @@ func TestStartEdu_NilResolver_422(t *testing.T) {
 	doc := e.files.add(a.UserID, files.PurposeEduDocument, files.ScanClean)
 	if _, err := e.svc.SubmitEduDocument(t.Context(), a, identity.EduDocumentSubmission{UniversityID: eduUni, FileID: doc}); err != nil {
 		t.Fatalf("document path without a resolver: %v", err)
+	}
+}
+
+// TestStartEdu_ListedDomainOutsideEduTR (BE-220, saha testi B-16): a
+// university whose students mail outside .edu.tr (Sabancı: sabanciuniv.edu)
+// verifies them by e-mail once the directory lists the domain; identity
+// asks the directory only, never the shape of the domain.
+func TestStartEdu_ListedDomainOutsideEduTR(t *testing.T) {
+	t.Parallel()
+	var asked []string
+	var mu sync.Mutex
+	e := newEduEnv(t, func(d *identity.Deps) {
+		d.Domains = func(ctx context.Context, domain string) (uuid.UUID, bool, error) {
+			mu.Lock()
+			asked = append(asked, domain)
+			mu.Unlock()
+			if domain == "kancauniv.edu" || strings.HasSuffix(domain, ".kancauniv.edu") {
+				return eduUni, true, nil
+			}
+			return fakeDomains(ctx, domain)
+		}
+	})
+	u, a := e.student(t, "ada@example.com")
+	mu.Lock()
+	asked = nil // the account's own sign-up asked about example.com (BE-097 path)
+	mu.Unlock()
+	e.verifyByEmail(t, a, "Ada.Yilmaz@Ogr.KancaUniv.edu")
+	rows := e.eduRows(t, u.ID)
+	if len(rows) != 1 || rows[0].Status != identity.EduVerified || *rows[0].UniversityID != eduUni ||
+		rows[0].EmailDomain != "ogr.kancauniv.edu" || rows[0].EduEmailNormalized != "ada.yilmaz@ogr.kancauniv.edu" {
+		t.Fatalf("rows %+v", rows)
+	}
+	if st, err := e.mod.Students.StudentStatus(t.Context(), u.ID); err != nil || st.Status != authz.StudentVerified {
+		t.Fatalf("student status = %+v, %v", st, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(asked, []string{"ogr.kancauniv.edu", "ogr.kancauniv.edu"}) {
+		t.Fatalf("resolver asked %v (start and confirm, the domain only)", asked)
 	}
 }
 

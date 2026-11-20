@@ -122,8 +122,8 @@ func TestUniversityByEmailDomain_SubdomainMatch(t *testing.T) {
 	_, _, err = e.svc.AdminPutUniversityEmailDomain(ctx, pad(t), u1, "ogr.birinci.edu.tr",
 		directory.DomainInput{DomainKind: directory.DomainMixed, IsActive: true})
 	problemtest.WantProblem(t, err, 409, "directory.domain_taken")
-	// Only .edu.tr domains are registered.
-	_, _, err = e.svc.AdminPutUniversityEmailDomain(ctx, pad(t), u1, "example.com",
+	// No public suffix and no shared mail service (BE-220; domain_test.go).
+	_, _, err = e.svc.AdminPutUniversityEmailDomain(ctx, pad(t), u1, "gmail.com",
 		directory.DomainInput{DomainKind: directory.DomainMixed, IsActive: true})
 	problemtest.WantProblem(t, err, 422, "validation_failed")
 }

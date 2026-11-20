@@ -7,7 +7,8 @@
 // Rules the package enforces:
 //
 //   - Reference data is public data only: names of universities, faculties
-//     and departments and their .edu.tr domains. No personal data.
+//     and departments and their e-mail domains (.edu.tr and, BE-220, other
+//     official domains: domain.go). No personal data.
 //   - A club or university org is opened with orgs.OrgAdmin.Create in
 //     directory's own transaction (01 §6.3, T-78): when the directory row
 //     fails, the org is rolled back with it.

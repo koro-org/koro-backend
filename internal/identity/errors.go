@@ -104,13 +104,13 @@ var (
 	ErrAccountActionOpen = problem.New(problem.Conflict, "identity.account_action_open", "A request for this action is already pending")
 	// ErrInvalidReason: a reason outside 5–500 characters of plain text.
 	ErrInvalidReason = problem.New(problem.Invalid, "identity.invalid_reason", "Invalid reason")
-	// ErrEduDomainUnknown: the address is not a .edu.tr address of a
-	// university the directory knows (hooks.domainResolver; nil until
-	// directory is wired). The student document path is the alternative
-	// (04 §2.1 startEduVerification).
+	// ErrEduDomainUnknown: the address's domain is not one the directory
+	// lists for a university (hooks.domainResolver; nil until directory is
+	// wired; .edu.tr or, BE-220, another listed official domain). The
+	// student document path is the alternative (04 §2.1 startEduVerification).
 	ErrEduDomainUnknown = problem.New(problem.Invalid, "identity.edu_domain_unknown",
 		"E-mail domain is not a known university; submit a student document instead")
-	// ErrEduEmailTaken: the .edu.tr address verifies another account
+	// ErrEduEmailTaken: the university address verifies another account
 	// (edu_verifications_email_uq). Only the holder of the address learns
 	// it, at confirmation: the start answers 202 either way.
 	ErrEduEmailTaken = problem.New(problem.Conflict, "identity.edu_email_taken", "This university address already verifies another account")

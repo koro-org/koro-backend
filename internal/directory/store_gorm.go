@@ -279,7 +279,7 @@ func (s gormStore) UpdateDomain(ctx context.Context, d EmailDomain) (EmailDomain
 
 // MatchDomain implements Store.
 //
-// cross-org: public reference data (identity's .edu.tr resolution).
+// cross-org: public reference data (identity's student e-mail resolution).
 func (s gormStore) MatchDomain(ctx context.Context, candidates []string) (EmailDomain, error) {
 	if len(candidates) == 0 {
 		return EmailDomain{}, ErrNotFound

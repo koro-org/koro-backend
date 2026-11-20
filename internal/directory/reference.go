@@ -313,8 +313,8 @@ func (s *service) importUniversity(ctx context.Context, r RefUniversity, loc str
 
 func (s *service) importDomain(ctx context.Context, u University, r RefDomain, loc string) (bool, bool, error) {
 	d := normalizeDomain(r.Domain)
-	if !domainRe.MatchString(d) {
-		return false, false, problem.Field(loc+"domain", "must be a .edu.tr domain")
+	if msg := domainRule(d); msg != "" {
+		return false, false, problem.Field(loc+"domain", msg)
 	}
 	if !r.DomainKind.Valid() {
 		return false, false, problem.Field(loc+"domain_kind", "must be one of student, staff, mixed")

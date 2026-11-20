@@ -106,9 +106,12 @@ func Register(api huma.API, svc Service) {
 
 	op.Register(api, "directory", huma.Operation{
 		OperationID: "adminPutUniversityEmailDomain", Method: http.MethodPut,
-		Path:        "/admin/universities/{university_id}/email-domains/{domain}",
-		Summary:     "Add or change a university's e-mail domain",
-		Description: "A .edu.tr domain; a domain of another university is 409 directory.domain_taken.",
+		Path:    "/admin/universities/{university_id}/email-domains/{domain}",
+		Summary: "Add or change a university's e-mail domain",
+		Description: "The domain proves a student of this university (student verification, longest match). Usually a " +
+			".edu.tr domain; another official domain of the university (e.g. sabanciuniv.edu) is accepted too, but " +
+			"never a public suffix (edu.tr, com.tr) or a shared mail service (gmail.com, outlook.com). " +
+			"A domain of another university is 409 directory.domain_taken.",
 	}, op.Meta{Action: string(authz.DirectoryUniversityManage), Surface: op.SurfaceAdmin}, h.adminPutDomain)
 
 	op.Register(api, "directory", huma.Operation{
@@ -600,7 +603,7 @@ func (h handler) adminUpdateUniversity(ctx context.Context, in *adminUpdateUnive
 
 type adminPutDomainInput struct {
 	UniversityPath
-	Domain string `path:"domain" maxLength:"253" doc:"A .edu.tr domain, e.g. itu.edu.tr"`
+	Domain string `path:"domain" maxLength:"253" doc:"An e-mail domain of the university, e.g. itu.edu.tr or sabanciuniv.edu"`
 	Body   struct {
 		DomainKind string `json:"domain_kind" enum:"student,staff,mixed"`
 		IsActive   bool   `json:"is_active"`

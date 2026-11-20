@@ -3,6 +3,7 @@ package directory
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"uuid"
 
@@ -379,14 +380,17 @@ func (s *service) AdminUpdateUniversity(ctx context.Context, a authz.Actor, id u
 }
 
 // AdminPutUniversityEmailDomain implements Service: creates the domain or
-// updates its kind and status; a domain of another university is 409.
+// updates its kind and status; a domain of another university is 409. A
+// domain outside .edu.tr (BE-220, domain.go) is allowed under domainRule;
+// the audit marks it (edu_tr=false) and a WARN log names the domain (not
+// personal data) so that every such addition is reviewed.
 func (s *service) AdminPutUniversityEmailDomain(ctx context.Context, a authz.Actor, universityID uuid.UUID, domain string, in DomainInput) (EmailDomain, bool, error) {
 	if err := authz.Can(ctx, a, authz.DirectoryUniversityManage, adminSurface); err != nil {
 		return EmailDomain{}, false, err
 	}
 	d := normalizeDomain(domain)
-	if !domainRe.MatchString(d) || len(d) > 253 {
-		return EmailDomain{}, false, problem.Field("path.domain", "must be a .edu.tr domain such as itu.edu.tr")
+	if msg := domainRule(d); msg != "" {
+		return EmailDomain{}, false, problem.Field("path.domain", msg)
 	}
 	if !in.DomainKind.Valid() {
 		return EmailDomain{}, false, problem.Field("body.domain_kind", "must be one of student, staff, mixed")
@@ -419,10 +423,15 @@ func (s *service) AdminPutUniversityEmailDomain(ctx context.Context, a authz.Act
 		org := u.OrgID
 		return s.d.Audit.Log(ctx, auditEvent(a, authz.DirectoryUniversityManage, authz.TypeUniversity, u.ID, &org, "",
 			map[string]any{"operation": "put_email_domain", "domain": d, "domain_kind": string(in.DomainKind),
-				"is_active": in.IsActive, "created": created}))
+				"is_active": in.IsActive, "created": created, "edu_tr": isEduTR(d)}))
 	})
 	if err != nil {
 		return EmailDomain{}, false, err
+	}
+	if !isEduTR(d) && in.IsActive {
+		s.d.Log.LogAttrs(ctx, slog.LevelWarn, "university e-mail domain outside .edu.tr",
+			slog.String("domain", d), slog.String("university_id", out.UniversityID.String()),
+			slog.String("actor_id", a.UserID.String()), slog.Bool("created", created))
 	}
 	return out, created, nil
 }

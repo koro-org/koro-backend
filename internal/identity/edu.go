@@ -20,17 +20,20 @@ import (
 
 // Student verification (01 §4.6, 02 §5.4, 04 §2.1; BE-018).
 //
-//   - .edu.tr path: startEduVerification resolves the address's domain to a
-//     university (hooks.domainResolver; directory) and mails a derived,
-//     single-use token (24 h) to the address; confirmEduVerification turns
-//     it into a verified row valid for one year. No row exists before the
-//     confirmation, so nobody can reserve someone else's address by
-//     starting a verification with it.
-//   - document path (açıköğretim, schools without .edu.tr): an edu_document
-//     upload (files: ClamAV + metadata removal) goes to the platform staff
-//     queue as a pending row; support or platform_admin approve or reject it,
-//     never their own (03 Y6, edu_verifications_reviewer_chk). Every
-//     download of a document is audited and its URL lives ≤ 5 minutes.
+//   - e-mail path: startEduVerification resolves the address's domain to a
+//     university (hooks.domainResolver: directory's allow-list of university
+//     domains, usually .edu.tr, since BE-220 also another official domain
+//     such as sabanciuniv.edu; identity never judges a domain by its shape)
+//     and mails a derived, single-use token (24 h) to the address;
+//     confirmEduVerification turns it into a verified row valid for one
+//     year. No row exists before the confirmation, so nobody can reserve
+//     someone else's address by starting a verification with it.
+//   - document path (açıköğretim, schools without a listed domain): an
+//     edu_document upload (files: ClamAV + metadata removal) goes to the
+//     platform staff queue as a pending row; support or platform_admin
+//     approve or reject it, never their own (03 Y6,
+//     edu_verifications_reviewer_chk). Every download of a document is
+//     audited and its URL lives ≤ 5 minutes.
 //   - A renewal (either path) supersedes the previous verification in the
 //     same transaction; a pending document is superseded by any new
 //     verification. identity.edu_expire lapses verifications whose year
@@ -38,21 +41,20 @@ import (
 //     audiences and club_admin, 01 §6.2); identity.edu_renewal_reminders
 //     warns 30, 7 and 1 days before.
 //
-// The .edu.tr address is personal: answers show it masked, logs never.
+// The university address is personal: answers show it masked, logs never.
 const (
 	resourceEdu = "edu_verification"
 	eduOwner    = "identity" // files.Owner.Module of student documents
 	eduAggType  = "edu_verification"
 	// eduDocumentTTL is the lifetime of a document download URL (04 §2.1:
 	// presigned ≤ 5 minutes).
-	eduDocumentTTL  = 5 * time.Minute
-	eduDomainSuffix = ".edu.tr"
-	maxReviewNote   = 500
+	eduDocumentTTL = 5 * time.Minute
+	maxReviewNote  = 500
 )
 
 // EduStart is the body of startEduVerification.
 type EduStart struct {
-	Email string // the .edu.tr address
+	Email string // the university address
 	// BirthDate is required when the account has none (eduAgeGate); an
 	// account that has one keeps it and the field is ignored.
 	BirthDate *civil.Date
@@ -117,8 +119,11 @@ func eduGate(id uuid.UUID) authz.Resource {
 	return eduResource(EduRecord{ID: id, UserID: uuid.Nil()})
 }
 
-// parseEduEmail validates a .edu.tr address and returns it with its
-// normalized form and its (ASCII lower-case) domain.
+// parseEduEmail validates a student address and returns it with its
+// normalized form and its (ASCII lower-case) domain. Whether the domain is
+// a university's is not decided here: only the directory's allow-list
+// knows (resolveDomain; BE-220: not every university mails under .edu.tr).
+// A domain outside ASCII is never listed (directory stores ASCII only).
 func parseEduEmail(raw, location string) (email, normalized, domain string, err error) {
 	email, normalized, err = parseEmail(raw, location)
 	if err != nil {
@@ -126,12 +131,9 @@ func parseEduEmail(raw, location string) (email, normalized, domain string, err 
 	}
 	_, d, _ := strings.Cut(email, "@")
 	domain = strings.ToLower(d)
-	if !strings.HasSuffix(domain, eduDomainSuffix) || len(domain) == len(eduDomainSuffix) {
-		return "", "", "", invalid(ErrEduDomainUnknown, location, "must be a .edu.tr address; otherwise submit a student document")
-	}
 	for _, r := range domain {
 		if r > 0x7e {
-			return "", "", "", invalid(ErrEduDomainUnknown, location, "must be a .edu.tr address; otherwise submit a student document")
+			return "", "", "", invalid(ErrEduDomainUnknown, location, "must be an address of a known university; otherwise submit a student document")
 		}
 	}
 	return email, normalized, domain, nil
@@ -178,9 +180,10 @@ func ageKnown(u User) error {
 	return nil
 }
 
-// resolveDomain maps a .edu.tr domain to its university. Without a
-// resolver (directory not wired) every domain is unknown: the safe default
-// keeps the student role closed and points at the document path.
+// resolveDomain maps the domain of a student address to its university
+// (directory's allow-list). Without a resolver (directory not wired) every
+// domain is unknown: the safe default keeps the student role closed and
+// points at the document path.
 func (s *service) resolveDomain(ctx context.Context, domain, location string) (uuid.UUID, error) {
 	unknown := invalid(ErrEduDomainUnknown, location, "is not an address of a known university; submit a student document instead")
 	if s.d.Domains == nil {
@@ -308,13 +311,13 @@ func (s *service) ConfirmEduVerification(ctx context.Context, a authz.Actor, raw
 	return nil
 }
 
-// eduAddress is a proven .edu.tr address with its university.
+// eduAddress is a proven university address with its university.
 type eduAddress struct {
 	email, normalized, domain string
 	uni                       uuid.UUID
 }
 
-// completeEduEmail writes the verified .edu.tr row of cur (locked in the
+// completeEduEmail writes the verified e-mail row of cur (locked in the
 // caller's transaction, whose address addr a token just proved): the open
 // verifications are superseded, the new one is valid for one year and
 // user.edu_verified (O) is written with it. confirmEduVerification and

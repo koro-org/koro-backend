@@ -2,6 +2,7 @@ package directory_test
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"sync"
 	"testing"
@@ -170,6 +171,7 @@ type env struct {
 	users   *userDir
 	files   *fakeFiles
 	removed *removedFiles
+	log     *slog.Logger // nil: obs.Discard (an envOption may set it)
 	mod     directory.Module
 	svc     directory.Service
 }
@@ -210,9 +212,12 @@ func newEnv(t *testing.T, opts ...envOption) *env {
 		return directory.OrgRef{Name: o.Name, Slug: o.Slug, Status: string(o.Status)}, true
 	})
 	e.store = &spyStore{Store: e.mem}
+	if e.log == nil {
+		e.log = obs.Discard()
+	}
 	mod, err := directory.New(directory.Deps{
 		Store: e.store, Tx: e.tx, Outbox: e.out, Queue: e.queue, Audit: e.audit, Orgs: e.orgs, Idempotency: idem,
-		Clock: clk, Log: obs.Discard(), Reauth: e.reauth, MemberCount: e.members.count, Sender: e.sender,
+		Clock: clk, Log: e.log, Reauth: e.reauth, MemberCount: e.members.count, Sender: e.sender,
 		PlatformAdmins: func(context.Context) ([]uuid.UUID, error) { return e.admins, nil },
 		Students:       e.ver, Users: e.users, Files: e.files,
 	})

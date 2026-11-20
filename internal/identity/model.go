@@ -190,7 +190,7 @@ type EmailToken struct {
 	ID          uuid.UUID
 	UserID      uuid.UUID
 	Purpose     TokenPurpose
-	TargetEmail string // email_change / edu_email target; account_email: student .edu.tr (BE-097); "" otherwise
+	TargetEmail string // email_change / edu_email target; account_email: a student's address (BE-097); "" otherwise
 	KeyID       string
 	TokenHash   []byte
 	ExpiresAt   time.Time

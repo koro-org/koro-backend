@@ -165,7 +165,10 @@ func TestConfirmEmail_EduSignup_OtherwiseAccountOnly(t *testing.T) {
 		noResolver    bool
 		wantEdu       any // the "edu" audit metadata (nil: none)
 	}{
-		{"not edu.tr", "ada@example.com", identity.PersonaStudent, false, nil},
+		// BE-220: the shape of a domain decides nothing, the directory does:
+		// an address it does not list verifies the account alone.
+		{"domain not listed", "ada@example.com", identity.PersonaStudent, false, "domain_unknown"},
+		{"non-ASCII domain", "ada@ünı.edu.tr", identity.PersonaStudent, false, nil},
 		{"unknown university", "ada@bilinmeyen.edu.tr", identity.PersonaStudent, false, "domain_unknown"},
 		{"directory not wired", "ada@ogr.uni.edu.tr", identity.PersonaStudent, true, "domain_unknown"},
 		{"club persona", "ada@ogr.uni.edu.tr", identity.PersonaClub, false, nil},

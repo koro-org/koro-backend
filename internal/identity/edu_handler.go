@@ -18,8 +18,10 @@ import (
 func registerEdu(api huma.API, h handler) {
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "startEduVerification", Method: http.MethodPost, Path: "/me/edu-verifications", DefaultStatus: http.StatusAccepted,
-		Summary: "Verify (or renew) my student status with a .edu.tr address",
-		Description: "A single-use link (valid 24 hours) goes to the address. 202 whether or not the address is " +
+		Summary: "Verify (or renew) my student status with a university e-mail address",
+		Description: "A single-use link (valid 24 hours) goes to the address. The domain must be one the directory lists " +
+			"for a university (usually .edu.tr; another official domain such as sabanciuniv.edu when listed). " +
+			"202 whether or not the address is " +
 			"free: an address that verifies another account gets nothing (no enumeration). An address whose domain " +
 			"is not a known university is 422 identity.edu_domain_unknown: submit a student document instead. An account " +
 			"without a birth date sends birth_date (422 identity.birth_date_required otherwise); an account that has one " +
@@ -30,7 +32,7 @@ func registerEdu(api huma.API, h handler) {
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "confirmEduVerification", Method: http.MethodPost, Path: "/auth/edu-verifications/confirm",
-		DefaultStatus: http.StatusNoContent, Summary: "Confirm a .edu.tr address",
+		DefaultStatus: http.StatusNoContent, Summary: "Confirm a university e-mail address",
 		Description: "Single use; an unknown, used or expired token is 422 identity.invalid_token. The account becomes a " +
 			"verified student for one year; a renewal supersedes the previous verification. An address that " +
 			"verifies another account is 409 identity.edu_email_taken. An account without a birth date (a link sent " +
@@ -42,7 +44,7 @@ func registerEdu(api huma.API, h handler) {
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "submitEduDocument", Method: http.MethodPost, Path: "/me/edu-verifications/document",
 		DefaultStatus: http.StatusAccepted, Summary: "Submit a student document for review",
-		Description: "For students without a .edu.tr address (open education). document_file_id is a completed " +
+		Description: "For students without an address at a listed university domain (open education). document_file_id is a completed " +
 			"edu_document upload of the caller (createUpload). The document waits for platform staff; one at a " +
 			"time (409 identity.edu_verification_pending). birth_date as in startEduVerification.",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationSubmitDocument), Surface: op.SurfaceSelf,
@@ -50,7 +52,7 @@ func registerEdu(api huma.API, h handler) {
 
 	op.Register(api, "identity", huma.Operation{
 		OperationID: "getMyEduVerification", Method: http.MethodGet, Path: "/me/edu-verification",
-		Summary: "My student verification", Description: "The .edu.tr address is masked (a***@ogr.x.edu.tr).",
+		Summary: "My student verification", Description: "The university address is masked (a***@ogr.x.edu.tr).",
 	}, op.Meta{Action: string(authz.IdentityEduVerificationReadOwn), Surface: op.SurfaceSelf}, h.myEdu)
 
 	op.Register(api, "identity", huma.Operation{
@@ -199,7 +201,7 @@ func toAdminEduDTO(v EduView) AdminEduVerificationDTO {
 
 type startEduInput struct {
 	Body struct {
-		EduEmail  emailText `json:"edu_email" doc:"A .edu.tr address of the caller's university"`
+		EduEmail  emailText `json:"edu_email" doc:"An address of the caller's university at a domain the directory lists (usually .edu.tr)"`
 		BirthDate string    `json:"birth_date,omitempty" format:"date" doc:"YYYY-MM-DD; required when the account has no birth date (a student's age must be known), ignored otherwise (set once)"`
 	}
 }

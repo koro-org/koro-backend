@@ -154,7 +154,7 @@ type Files interface {
 	Delete(ctx context.Context, a authz.Actor, fileID uuid.UUID) error
 }
 
-// DomainResolver maps the domain of a .edu.tr address to a university
+// DomainResolver maps the domain of a student address to a university
 // (hooks.domainResolver: directory.Catalog.UniversityByEmailDomain, 01 §5.3;
 // identity never imports directory). found=false: not a known university.
 type DomainResolver func(ctx context.Context, domain string) (universityID uuid.UUID, found bool, err error)

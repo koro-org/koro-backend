@@ -1,6 +1,11 @@
 package authz
 
-import "uuid"
+import (
+	"context"
+	"errors"
+	"slices"
+	"uuid"
+)
 
 // Role is a role path of the matrix (03 §1.1 columns, plus the sub-roles of
 // k-cs and k-own and the P/O cells). A Grant names the path that allows an
@@ -96,6 +101,75 @@ func OrgSurfaceVisible(a Actor, orgID *uuid.UUID) bool {
 // admins too. Memberships ended before are not known (the actor carries the
 // active ones).
 func orgParty(a Actor, r Resource) bool { return r.OrgID != nil && a.MemberOf(*r.OrgID) }
+
+// staffPaths are the role paths of the platform roles (03 §1.1 rows 11–16).
+var staffPaths = map[Role]bool{
+	RoleModerator: true, RoleSupport: true, RoleDPO: true, RolePlatformAdmin: true, RoleFinanceAdmin: true,
+	RoleTalentAuditor: true,
+}
+
+// ownOrg reports whether orgID is an org of a's own for the party rule of
+// an org's surface (BE-214, Q-69): a current member of it, any role, other
+// than the platform org. The platform org is no party's: its members are
+// the platform staff themselves, their staff membership grants nothing
+// (03 §1.2), their authority there is the platform role (k-po), and its
+// surface is the platform's own management, so the rule would lock the
+// platform out of its own org.
+func ownOrg(a Actor, orgID *uuid.UUID) bool {
+	return orgID != nil && a.MemberOf(*orgID) && !platformOrg(a, orgID)
+}
+
+// asMember is the party rule of an org's own surface (BE-214, Q-69; T-438):
+// a platform staff member who belongs to the org r names (ownOrg) acts
+// there with the membership only, so the platform staff paths (pad, fin,
+// dpo, sup, mod, tal; break-glass included) are dropped from gs and the
+// membership's grants stay. Every policy wraps the grants of its org
+// surface (/orgs/{org_id}/..., 03 §3.6, §7.6) with it, and those of the
+// resource-surface operations that run one org's own content (a club's
+// profile, an event and its registrations and exports, an offering);
+// TestOrgSurfaceParty_StaffActsAsMember checks every one of them against
+// the OpenAPI spec.
+// Staff decisions on an org (the admin surface) follow their own party
+// rule (orgParty).
+func asMember(a Actor, r Resource, gs []Grant) []Grant {
+	if !ownOrg(a, r.OrgID) {
+		return gs
+	}
+	return slices.DeleteFunc(slices.Clone(gs), func(g Grant) bool { return staffPaths[g.Role] })
+}
+
+// ActsAsStaff reports whether a acts as platform staff on orgID: it holds
+// one of roles (any platform role when roles is empty) and orgID is no org
+// of its own (BE-214, Q-69: a member acts on its org with the membership
+// only; the platform org is no party's). The services ask it wherever a
+// platform role lifts an org's rule: the suspended org's write ban (03
+// §2.3), the tax identifier review, unmasked identifiers, a submission as
+// the first eye. uuid.Nil (no org: an admin-surface act) asks for the
+// roles alone.
+func ActsAsStaff(a Actor, orgID uuid.UUID, roles ...PlatformRole) bool {
+	if ownOrg(a, &orgID) {
+		return false
+	}
+	if len(roles) == 0 {
+		return a.HasAnyPlatformRole()
+	}
+	return slices.ContainsFunc(roles, a.HasPlatformRole)
+}
+
+// PartyRefused reports whether err, the refusal of act on r to a, is a
+// party rule's (BE-208, BE-212, BE-214): a belongs to r's org and the same
+// person without that membership would be allowed, so a platform role it
+// holds is what the rule set aside. The services record such a refusal
+// (denied audit, reason org_member); any other refusal reports false.
+func PartyRefused(ctx context.Context, a Actor, act Action, r Resource, err error) bool {
+	if !errors.Is(err, ErrForbidden) || r.OrgID == nil || !a.MemberOf(*r.OrgID) || !a.HasAnyPlatformRole() {
+		return false
+	}
+	org := *r.OrgID
+	outside := a
+	outside.Memberships = slices.DeleteFunc(slices.Clone(a.Memberships), func(m Membership) bool { return m.OrgID == org })
+	return Can(ctx, outside, act, r) == nil
+}
 
 // AdminSurfaceVisible is the visibility of /admin/** (03 §3.2, §7.2-3): the
 // surface is no secret, so every user sees it and an actor without a

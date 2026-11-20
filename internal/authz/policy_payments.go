@@ -117,7 +117,7 @@ func paymentsPolicy() Policy {
 			pad, fin := Grant{Role: RolePlatformAdmin}, Grant{Role: RoleFinanceAdmin}
 			switch r.Type {
 			case TypeOrg:
-				return refundRequestOrgGrants(a, act, r, pad, fin)
+				return asMember(a, r, refundRequestOrgGrants(a, act, r, pad, fin)) // BE-214
 			case TypeRefundRequest:
 				return refundRequestGrants(a, act, r, pad, fin)
 			case TypeAdminSurface:

@@ -178,7 +178,8 @@ func (s *service) view(ctx context.Context, a authz.Actor, c Club) (ClubView, er
 }
 
 // writableOrg is the org status rule of a club write (03 §2.3): a closed
-// club takes no change, a suspended one only a platform admin's.
+// club takes no change, a suspended one only a platform admin's who is no
+// member of it (BE-214, Q-69).
 func (s *service) writableOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error {
 	o, err := s.d.Orgs.Get(ctx, orgID)
 	if err != nil {
@@ -188,7 +189,7 @@ func (s *service) writableOrg(ctx context.Context, a authz.Actor, orgID uuid.UUI
 	case orgs.StatusClosed:
 		return ErrInvalidState
 	case orgs.StatusSuspended:
-		if !a.HasPlatformRole(authz.PlatformAdmin) {
+		if !authz.ActsAsStaff(a, orgID, authz.PlatformAdmin) {
 			return orgs.ErrOrgSuspended
 		}
 	}

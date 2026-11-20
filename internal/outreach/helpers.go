@@ -41,8 +41,9 @@ func surface(orgID uuid.UUID) authz.Resource {
 
 // usableOrg loads orgID and applies the org status rule of 03 §2.3 to a
 // write or a count on its behalf: a suspended org only through a platform
-// admin, a company awaiting verification likewise, a closed org not at
-// all. A missing org is 404. The codes are orgs' (06 H-52).
+// admin who is no member of it (BE-214, Q-69), a company awaiting
+// verification likewise, a closed org not at all. A missing org is 404. The
+// codes are orgs' (06 H-52).
 func (s *service) usableOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID) error {
 	o, err := s.d.Orgs.Get(ctx, orgID)
 	switch {
@@ -51,7 +52,7 @@ func (s *service) usableOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID)
 	case err != nil:
 		return err
 	}
-	pad := a.HasPlatformRole(authz.PlatformAdmin)
+	pad := authz.ActsAsStaff(a, o.ID, authz.PlatformAdmin)
 	switch o.Status {
 	case orgs.StatusActive:
 		return nil

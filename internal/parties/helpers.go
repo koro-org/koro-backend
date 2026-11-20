@@ -84,9 +84,10 @@ func documentResource(d Document) authz.Resource {
 }
 
 // fullTaxIDs reports whether a sees VKN and MERSİS unmasked (finance and
-// platform admins; BE-036).
-func fullTaxIDs(a authz.Actor) bool {
-	return a.HasPlatformRole(authz.PlatformAdmin) || a.HasPlatformRole(authz.PlatformFinanceAdmin)
+// platform admins; BE-036) on org's surface (uuid.Nil: no org): a member of
+// org reads it as a member, masked (BE-214, Q-69).
+func fullTaxIDs(a authz.Actor, org uuid.UUID) bool {
+	return authz.ActsAsStaff(a, org, authz.PlatformAdmin, authz.PlatformFinanceAdmin)
 }
 
 // writableOrg is the org status rule of writes on behalf of an org (03
@@ -97,7 +98,7 @@ func writableOrg(a authz.Actor, o orgs.OrgSummary) error {
 	case orgs.StatusClosed:
 		return orgs.ErrInvalidState
 	case orgs.StatusSuspended:
-		if !fullTaxIDs(a) {
+		if !fullTaxIDs(a, o.ID) {
 			return orgs.ErrOrgSuspended
 		}
 	}

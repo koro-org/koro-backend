@@ -70,7 +70,7 @@ func (s *service) ListOrgParties(ctx context.Context, a authz.Actor, orgID uuid.
 			visible = append(visible, op.Party)
 		}
 	}
-	return s.views(ctx, visible, fullTaxIDs(a))
+	return s.views(ctx, visible, fullTaxIDs(a, orgID))
 }
 
 // GetOrgParty implements Service. Order: the org (404) → authz on the
@@ -90,7 +90,7 @@ func (s *service) GetOrgParty(ctx context.Context, a authz.Actor, orgID, partyID
 	if err := authz.Can(ctx, a, authz.PartiesLegalPartyRead, partyResource(orgID, op)); err != nil {
 		return PartyView{}, err
 	}
-	return s.view(ctx, op.Party, fullTaxIDs(a))
+	return s.view(ctx, op.Party, fullTaxIDs(a, orgID))
 }
 
 // AdminListParties implements Service: every party, newest first (03

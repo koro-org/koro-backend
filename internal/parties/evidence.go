@@ -289,7 +289,7 @@ func (s *service) ReplaceBankAccountEvidence(ctx context.Context, a authz.Actor,
 // eyes sound: b waits for an eye (an approved account is submitted again)
 // and, for an org role, b is an org submission (409 parties.invalid_state).
 func evidenceReplaceable(a authz.Actor, b BankAccount) error {
-	if !b.Status.Pending() || b.SubmittedByAdmin && !staff(a) {
+	if !b.Status.Pending() || b.SubmittedByAdmin && !staff(a, b.OrgID) {
 		return ErrInvalidState
 	}
 	return nil

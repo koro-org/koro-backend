@@ -105,7 +105,7 @@ func directoryPolicy() Policy {
 				if clubAdmin {
 					gs = append(gs, Grant{Role: RoleClubAdmin})
 				}
-				return gs
+				return asMember(a, r, gs) // BE-214: a member edits its club's profile as a member
 			case DirectoryClubRequestSensitivity:
 				if clubAdmin {
 					return []Grant{{Role: RoleClubAdmin}}

@@ -231,7 +231,7 @@ func (h handler) listServices(ctx context.Context, in *listServicesInput) (*cata
 	out := &catalogServiceListOutput{}
 	out.Body.Items = make([]CatalogServiceDTO, len(vs))
 	for i, v := range vs {
-		out.Body.Items[i] = serviceDTO(v, staff(a))
+		out.Body.Items[i] = serviceDTO(v, staff(a, uuid.Nil()))
 	}
 	return out, nil
 }

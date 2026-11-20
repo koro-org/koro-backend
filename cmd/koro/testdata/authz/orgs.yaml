@@ -13,6 +13,10 @@
 # sensitive club's list and memberships are hidden from every platform role (Y2: 404). /me and
 # acceptOrgInvitation are the caller's own (another's ID or an invitation to another address → 404).
 # joinClub is a resource surface (the club is public): a non-student is 403.
+# BE-214 (Q-69): on the management surface of an org they belong to (any role; the platform org
+# aside), platform staff act with the membership only (authz asMember; every module's org surface
+# and its own-content resource operations). No persona is both staff and a member, so the codes
+# here do not change; TestOrgSurfaceParty_* (authz) and TestOrgSurface_* (orgs) pin the rule.
 version: 1
 groups:
   # signed-in users without a membership in company_a.
@@ -196,8 +200,9 @@ operations:
     body: bodies/orgs/close.json
     note: >-
       Party rule (BE-212): platform staff closing a pending_review org reject its registration, refused (403) to a
-      platform_admin who is a member of it; no persona is both and company_a is active, so
-      TestOrgReview_PartyCannotDecide pins it
+      platform_admin who is a member of it; since BE-214 the org surface refuses such a member first (only the
+      owner closes as a member); no persona is both and company_a is active, so TestOrgReview_PartyCannotDecide
+      and TestOrgSurface_PartyCannotTakeOver pin it
     expect:
       anonymous: 401
       "@outsiders_company_a": 404

@@ -53,8 +53,9 @@ func (s *service) ListOrg(ctx context.Context, a authz.Actor, orgID uuid.UUID, q
 		return Page[View]{}, err
 	}
 	rows, more := page.Cut(rows, limit)
-	// IP and User-Agent only for dpo and platform_admin (04 §2.21).
-	network := a.HasPlatformRole(authz.PlatformDPO) || a.HasPlatformRole(authz.PlatformAdmin)
+	// IP and User-Agent only for dpo and platform_admin (04 §2.21), who are
+	// no member of the org (BE-214, Q-69: a member reads as a member).
+	network := authz.ActsAsStaff(a, orgID, authz.PlatformDPO, authz.PlatformAdmin)
 	items, err := s.views(ctx, rows, network, false)
 	if err != nil {
 		return Page[View]{}, err

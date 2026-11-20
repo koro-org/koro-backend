@@ -25,7 +25,7 @@ func (s *service) ListServices(ctx context.Context, a authz.Actor, category Cate
 	if category != "" && !category.Valid() {
 		return nil, problem.Field("query.category", "is not a service category")
 	}
-	return s.d.Store.ListServices(ctx, ServiceFilter{Category: category, SellableOnly: !staff(a)})
+	return s.d.Store.ListServices(ctx, ServiceFilter{Category: category, SellableOnly: !staff(a, uuid.Nil())})
 }
 
 // AdminCreateService implements Service. Setting the accountant's review

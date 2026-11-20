@@ -146,7 +146,7 @@ func catalogPolicy() Policy {
 					return []Grant{pad, fin}
 				}
 			case TypeOrg:
-				return catalogOrgGrants(a, act, r, pad, fin)
+				return asMember(a, r, catalogOrgGrants(a, act, r, pad, fin)) // BE-214
 			case TypeOffering:
 				return offeringGrants(a, act, r, signedIn, pad)
 			}
@@ -213,7 +213,7 @@ func offeringGrants(a Actor, act Action, r Resource, signedIn []Grant, pad Grant
 		add(uniRep, Grant{Role: RoleUniversityRep})
 		add(a.HasOrgRole(org, MemberCareerStaff), Grant{Role: RoleCareerStaff})
 		add(universityReviewer(a, r), Grant{Role: RoleUniversityRep})
-		gs = append(gs, pad)
+		gs = asMember(a, r, append(gs, pad)) // BE-214: the seller's own offering
 	case CatalogOfferingUpdate, CatalogOfferingSubmit:
 		add(clubAdmin, Grant{Role: RoleClubAdmin})
 		add(uniRep, Grant{Role: RoleUniversityRep})
@@ -221,7 +221,7 @@ func offeringGrants(a Actor, act Action, r Resource, signedIn []Grant, pad Grant
 	case CatalogOfferingCancel:
 		add(clubAdmin, Grant{Role: RoleClubAdmin})
 		add(uniRep, Grant{Role: RoleUniversityRep})
-		gs = append(gs, pad)
+		gs = asMember(a, r, append(gs, pad)) // BE-214: the seller's own offering
 	case CatalogOfferingDecide:
 		gs = append(gs, pad) // k24: the core refuses the creator (Attrs created_by)
 	case CatalogOfferingUniversityDecide:

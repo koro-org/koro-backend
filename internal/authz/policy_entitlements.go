@@ -43,7 +43,7 @@ func entitlementsPolicy() Policy {
 				if a.HasOrgRole(*r.OrgID, MemberCompanyAdmin, MemberCompanyOwner) {
 					gs = append(gs, Grant{Role: RoleCompanyAdmin})
 				}
-				return gs
+				return asMember(a, r, gs) // BE-214: a member reads its org's rights as a member
 			case EntitlementsEntitlementGrant, EntitlementsEntitlementRevoke:
 				return staff
 			}

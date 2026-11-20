@@ -38,6 +38,16 @@ const TypeOrgCatalog = "org_catalog"
 // by closeOrg: it decides the same review) and orgs.org.suspend
 // (adminSuspendOrg, adminReactivateOrg, adminRejectTaxIdChange).
 //
+// The org surface's party rule (BE-214, Q-69; asMember): on the
+// management surface of an org they belong to (any role; the platform org
+// is no party's), platform staff act with the membership only: a
+// platform_admin who is its company_admin neither transfers the ownership
+// (to themselves or anyone) nor closes it, and changes members, roles and
+// invitations only as its company_admin; the support and platform_admin
+// break-glass reads of its member list are gone too. The services lift the
+// suspended org's ban only for platform admins who are no party
+// (authz.ActsAsStaff).
+//
 // k-cmp (BE-017 reading of 03 §5.2 orgs.company.create): the usr column is
 // an account with no student verification and no platform role (platform
 // roles are staff accounts and their cells are ✗), and a minor never
@@ -142,13 +152,13 @@ func orgsPolicy() Policy {
 				if a.HasOrgRole(org, MemberCompanyAdmin, MemberCompanyOwner) {
 					gs = append(gs, Grant{Role: RoleCompanyAdmin})
 				}
-				return gs
+				return asMember(a, r, gs)
 			case OrgsOrgClose, OrgsOwnershipTransfer:
 				gs := []Grant{pad}
 				if r.OrgID != nil && a.HasOrgRole(*r.OrgID, MemberCompanyOwner) { // k-own
 					gs = append(gs, Grant{Role: RoleCompanyOwner})
 				}
-				return gs
+				return asMember(a, r, gs)
 			case OrgsOrgListAdmin:
 				return []Grant{{Role: RoleModerator}, {Role: RoleSupport}, pad}
 			case OrgsOrgVerify, OrgsOrgSuspend:
@@ -157,13 +167,13 @@ func orgsPolicy() Policy {
 				}
 				return []Grant{pad}
 			case OrgsMemberList, OrgsMemberRead:
-				return orgsMemberReadGrants(a, r)
+				return asMember(a, r, orgsMemberReadGrants(a, r))
 			case OrgsMemberDecide:
 				return orgsRoleGrants(a, r, false, MemberClubAdmin)
 			case OrgsMemberRemove:
-				return orgsRoleGrants(a, r, true, MemberClubAdmin, MemberUniversityRep, MemberCompanyAdmin, MemberCompanyOwner)
+				return asMember(a, r, orgsRoleGrants(a, r, true, MemberClubAdmin, MemberUniversityRep, MemberCompanyAdmin, MemberCompanyOwner))
 			case OrgsMemberChangeRole, OrgsInvitationCreate, OrgsInvitationList, OrgsInvitationRevoke:
-				return orgsRoleGrants(a, r, true, MemberClubAdmin, MemberCompanyAdmin, MemberCompanyOwner)
+				return asMember(a, r, orgsRoleGrants(a, r, true, MemberClubAdmin, MemberCompanyAdmin, MemberCompanyOwner))
 			case OrgsMembershipListOwn, OrgsMembershipLeave, OrgsInvitationAccept:
 				return []Grant{{Role: RoleSelf}}
 			case OrgsMemberJoin:

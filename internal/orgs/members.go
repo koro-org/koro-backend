@@ -449,8 +449,10 @@ func (s *service) RejectJoinRequest(ctx context.Context, a authz.Actor, orgID, i
 }
 
 // RemoveMember implements Service: an active membership ends (removed);
-// the last club_admin and the company_owner stay (409 orgs.last_admin).
-func (s *service) RemoveMember(ctx context.Context, a authz.Actor, orgID, id uuid.UUID, reason string) error {
+// the last club_admin and the company_owner stay (409 orgs.last_admin). A
+// refusal of the party rule is recorded after the rollback (BE-214).
+func (s *service) RemoveMember(ctx context.Context, a authz.Actor, orgID, id uuid.UUID, reason string) (err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	reason = strings.TrimSpace(reason)
 	if utf8.RuneCountInString(reason) > maxReason {
 		return problem.Field("body.reason", "must be at most 500 characters")
@@ -468,7 +470,7 @@ func (s *service) RemoveMember(ctx context.Context, a authz.Actor, orgID, id uui
 		if err != nil {
 			return uuid.Nil(), err
 		}
-		if err := authz.Can(ctx, a, authz.OrgsMemberRemove, memberResource(m, sens, "")); err != nil {
+		if err := can(ctx, a, authz.OrgsMemberRemove, memberResource(m, sens, ""), nil); err != nil {
 			return uuid.Nil(), err
 		}
 		if err := writable(a, o); err != nil {
@@ -505,8 +507,10 @@ func checkNewRole(k Kind, r authz.MemberRole) error {
 // ChangeMemberRole implements Service: the old row ends (role_changed) and
 // a new active row with the role starts (02 §7.3: the history is kept; in
 // a sensitive club the old row is deleted). The member's sessions close
-// when an MFA role is gained or lost (03 §2.2-6).
-func (s *service) ChangeMemberRole(ctx context.Context, a authz.Actor, orgID, id uuid.UUID, role authz.MemberRole) (MemberView, error) {
+// when an MFA role is gained or lost (03 §2.2-6). A refusal of the party
+// rule is recorded after the rollback (BE-214).
+func (s *service) ChangeMemberRole(ctx context.Context, a authz.Actor, orgID, id uuid.UUID, role authz.MemberRole) (_ MemberView, err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	hash, err := idempotency.Hash(struct {
 		Op      string
 		Org, ID uuid.UUID
@@ -520,7 +524,8 @@ func (s *service) ChangeMemberRole(ctx context.Context, a authz.Actor, orgID, id
 		if err != nil {
 			return Membership{}, err
 		}
-		if err := authz.Can(ctx, a, authz.OrgsMemberChangeRole, memberResource(m, sens, "")); err != nil {
+		if err := can(ctx, a, authz.OrgsMemberChangeRole, memberResource(m, sens, ""),
+			map[string]any{"new_role": string(role)}); err != nil {
 			return Membership{}, err
 		}
 		if err := writable(a, o); err != nil {

@@ -53,8 +53,10 @@ func accountEvent(a authz.Actor, act authz.Action, b BankAccount, reason string,
 	}.By(a)
 }
 
-// staff reports a finance or platform admin (an admin submission).
-func staff(a authz.Actor) bool { return fullTaxIDs(a) }
+// staff reports a finance or platform admin acting as such on org (an admin
+// submission; uuid.Nil: no org): a member of org submits as a member
+// (BE-214, Q-69).
+func staff(a authz.Actor, org uuid.UUID) bool { return fullTaxIDs(a, org) }
 
 // reauth verifies the proof of an R operation (03 §6.2) and returns its
 // kind for the audit record; without a verifier the operation fails closed.
@@ -155,7 +157,7 @@ func (s *service) SubmitPayeeBankAccount(ctx context.Context, a authz.Actor, org
 	if err := writableOrg(a, o); err != nil {
 		return BankAccountView{}, err
 	}
-	return s.submit(ctx, a, p, in, proof)
+	return s.submit(ctx, a, p, in, proof, staff(a, o.ID))
 }
 
 // AdminSubmitBankAccount implements Service (R): authz (403 before
@@ -168,7 +170,7 @@ func (s *service) AdminSubmitBankAccount(ctx context.Context, a authz.Actor, pay
 	if err != nil {
 		return BankAccountView{}, err
 	}
-	return s.submit(ctx, a, p, in, proof)
+	return s.submit(ctx, a, p, in, proof, staff(a, uuid.Nil()))
 }
 
 // submit is the shared tail of both submissions: payee status (closed: 409)
@@ -178,8 +180,11 @@ func (s *service) AdminSubmitBankAccount(ctx context.Context, a authz.Actor, pay
 // (pending_verification for org roles, pending_approval for finance and
 // platform admins; 409 parties.bank_account_pending when one waits), the
 // evidence attached, audit, payee_bank_account.submitted (O: finance
-// admins and the payee org's admins are told).
-func (s *service) submit(ctx context.Context, a authz.Actor, p Payee, in BankAccountInput, proof identity.ReauthProof) (BankAccountView, error) {
+// admins and the payee org's admins are told). admin: a submits as platform
+// staff (the admin surface, or the org surface of an org a is no member of:
+// BE-214).
+func (s *service) submit(ctx context.Context, a authz.Actor, p Payee, in BankAccountInput, proof identity.ReauthProof,
+	admin bool) (BankAccountView, error) {
 	if p.Status == PayeeClosed {
 		return BankAccountView{}, ErrInvalidState
 	}
@@ -204,7 +209,6 @@ func (s *service) submit(ctx context.Context, a authz.Actor, p Payee, in BankAcc
 	if err != nil {
 		return BankAccountView{}, err
 	}
-	admin := staff(a)
 	b := BankAccount{
 		PayeeID: p.ID, OrgID: p.OrgID, IBAN: number, HolderName: holder, BankName: bank, EvidenceFileID: in.EvidenceFileID,
 		Status: AccountPendingVerification, SubmittedBy: a.UserID, SubmittedByAdmin: admin,

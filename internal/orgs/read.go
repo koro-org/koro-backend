@@ -146,15 +146,18 @@ func (s *service) readable(ctx context.Context, a authz.Actor, o Org) (OrgView, 
 	// never takes the deny path.
 	if o.Kind == KindCompany && (a.MemberOf(o.ID) || a.HasPlatformRole(authz.PlatformAdmin)) {
 		v.Manage = authz.Can(ctx, a, authz.OrgsOrgUpdate, r) == nil
-		v.FullTaxNo = v.Manage && fullTaxNo(a)
+		v.FullTaxNo = v.Manage && fullTaxNo(a, o.ID)
 	}
 	return v, nil
 }
 
-// fullTaxNo reports whether a reads a company's VKN unmasked: platform
-// admins, who verify the application (BE-165; 06 H-60 masks it for the
-// org roles).
-func fullTaxNo(a authz.Actor) bool { return a.HasPlatformRole(authz.PlatformAdmin) }
+// fullTaxNo reports whether a reads the VKN of the company orgID unmasked:
+// platform admins, who verify the application (BE-165; 06 H-60 masks it for
+// the org roles), unless they are a member of it (BE-214: a member reads as
+// a member).
+func fullTaxNo(a authz.Actor, orgID uuid.UUID) bool {
+	return authz.ActsAsStaff(a, orgID, authz.PlatformAdmin)
+}
 
 // view loads the company profile and the logo URLs of o.
 func (s *service) view(ctx context.Context, o Org) (OrgView, error) {

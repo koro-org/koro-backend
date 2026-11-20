@@ -120,13 +120,15 @@ func invitationAudit(a authz.Actor, act authz.Action, inv Invitation, meta map[s
 // open one is 409 orgs.invitation_exists, an account of the address that
 // already holds the role is 409 orgs.already_member, then the row (token
 // hash only) and org_invitation.created (O). The address is never audited or
-// logged.
-func (s *service) CreateInvitation(ctx context.Context, a authz.Actor, orgID uuid.UUID, email string, role authz.MemberRole) (Invitation, error) {
+// logged. A refusal of the party rule is recorded with the role (BE-214).
+func (s *service) CreateInvitation(ctx context.Context, a authz.Actor, orgID uuid.UUID, email string, role authz.MemberRole) (_ Invitation, err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return Invitation{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsInvitationCreate, invitationResource(o.ID, o.Kind, role, nil)); err != nil {
+	if err := can(ctx, a, authz.OrgsInvitationCreate, invitationResource(o.ID, o.Kind, role, nil),
+		map[string]any{"role": string(role)}); err != nil {
 		return Invitation{}, err
 	}
 	if err := writable(a, o); err != nil {
@@ -240,8 +242,10 @@ func (s *service) ListInvitations(ctx context.Context, a authz.Actor, orgID uuid
 }
 
 // RevokeInvitation implements Service: an open invitation of the org is
-// revoked (another org's ID, or a closed one, is 404).
-func (s *service) RevokeInvitation(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) error {
+// revoked (another org's ID, or a closed one, is 404). A refusal of the
+// party rule is recorded (BE-214).
+func (s *service) RevokeInvitation(ctx context.Context, a authz.Actor, orgID, id uuid.UUID) (err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	o, err := s.orgs().GetOrg(ctx, orgID)
 	if err != nil {
 		return err
@@ -250,7 +254,9 @@ func (s *service) RevokeInvitation(ctx context.Context, a authz.Actor, orgID, id
 	if err != nil {
 		return err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsInvitationRevoke, invitationResource(o.ID, o.Kind, inv.Role, nil)); err != nil {
+	r := invitationResource(o.ID, o.Kind, inv.Role, nil)
+	r.ID = inv.ID // the denied record names it
+	if err := can(ctx, a, authz.OrgsInvitationRevoke, r, nil); err != nil {
 		return err
 	}
 	if err := writable(a, o); err != nil {

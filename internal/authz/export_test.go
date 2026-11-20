@@ -28,3 +28,20 @@ func PolicyWritten(module string) bool { return modulePolicies()[module].Grants 
 
 // CoreTypes exposes the 03 §3.5 table.
 func CoreTypes() map[string][]string { return maps.Clone(coreTypes) }
+
+// ResourceTypes exposes every resource type of the decision table (03 §3.5
+// and the module-declared ones) with its mandatory Attrs keys.
+func ResourceTypes() map[string][]string { return maps.Clone(std.types) }
+
+// PolicyGrants returns the role paths act's module policy gives a on r,
+// before the core's checks (holds, bans, conditions).
+func PolicyGrants(a Actor, act Action, r Resource) []Grant {
+	p := std.policies[act.Module()]
+	if p.Grants == nil {
+		return nil
+	}
+	return p.Grants(a, act, r)
+}
+
+// StaffPath reports whether g is a platform role's path.
+func StaffPath(g Grant) bool { return staffPaths[g.Role] }

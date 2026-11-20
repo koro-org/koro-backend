@@ -87,7 +87,7 @@ func ordersPolicy() Policy {
 			pad, fin, sup := Grant{Role: RolePlatformAdmin}, Grant{Role: RoleFinanceAdmin}, Grant{Role: RoleSupport}
 			switch r.Type {
 			case TypeOrg:
-				return ordersOrgGrants(a, act, r, pad, fin)
+				return asMember(a, r, ordersOrgGrants(a, act, r, pad, fin)) // BE-214
 			case TypeAdminSurface:
 				switch act {
 				case OrdersOrderListAdmin:

@@ -47,7 +47,7 @@ func auditPolicy() Policy {
 				if a.HasOrgRole(org, MemberCompanyAdmin, MemberCompanyOwner) {
 					gs = append(gs, Grant{Role: RoleCompanyAdmin})
 				}
-				return gs
+				return asMember(a, r, gs) // BE-214: a member reads its org's log as a member
 			case AuditEventList, AuditChainVerify:
 				return staff
 			}

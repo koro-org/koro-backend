@@ -36553,7 +36553,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: public
     patch:
-      description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended). Replacing the tax identifier on file of a company past its review needs re-authentication (reauth; 403 identity.reauth_required, identity.reauth_failed). When a member does it, the active company stays active and the change waits for a platform admin (company.tax_id_review_requested_at; adminApproveTaxIdChange, adminRejectTaxIdChange). Another identifier clears a rejection's company.tax_id_rejection_reason. The other changes need no proof."
+      description: "If-Match with the ETag of getOrg is required: missing → 428, stale → 412. Company fields apply to companies only. A suspended org cannot be changed by its members (403 orgs.org_suspended). Replacing the tax identifier on file of a company past its review needs re-authentication (reauth; 403 identity.reauth_required, identity.reauth_failed). When a member does it, the active company stays active and the change waits for a platform admin (company.tax_id_review_requested_at; adminApproveTaxIdChange, adminRejectTaxIdChange). Another identifier clears a rejection's company.tax_id_rejection_reason. The other changes need no proof. Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: updateOrg
       parameters:
         - description: Organization ID
@@ -36705,7 +36705,7 @@ paths:
       x-koro-terms-gate: exempt
   /api/v1/orgs/{org_id}/close:
     post:
-      description: "Company owner or platform admin, with re-authentication. Open orders or payouts → 409 orgs.open_commerce. Every membership ends (org_closed). Platform staff closing a pending_review org reject its registration (its owner withdraws it): the reason is kept for the founder's notice. A platform admin who is a member of the org (any role) is a party in a rejection: 403 forbidden, checked before the proof (another platform admin decides)."
+      description: "Company owner or platform admin, with re-authentication. Open orders or payouts → 409 orgs.open_commerce. Every membership ends (org_closed). Platform staff closing a pending_review org reject its registration (its owner withdraws it): the reason is kept for the founder's notice. A platform admin who is a member of the org (any role) is a party in a rejection: 403 forbidden, checked before the proof (another platform admin decides). Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: closeOrg
       parameters:
         - description: Organization ID
@@ -38245,6 +38245,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/invitations:
     get:
+      description: "Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: listOrgInvitations
       parameters:
         - description: Organization ID
@@ -38299,7 +38300,7 @@ paths:
       x-koro-rate-limit: read_default
       x-koro-surface: org
     post:
-      description: The invitation is valid for 7 days and can be accepted once, by the account with the invited address only. company_owner is never invited; university roles are invited by platform_admin.
+      description: "The invitation is valid for 7 days and can be accepted once, by the account with the invited address only. company_owner is never invited; university roles are invited by platform_admin. Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: createOrgInvitation
       parameters:
         - description: Organization ID
@@ -38344,6 +38345,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/invitations/{invitation_id}:
     delete:
+      description: "Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: revokeOrgInvitation
       parameters:
         - description: Organization ID
@@ -38866,7 +38868,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members:
     get:
-      description: "The org's admins (club_admin, university_rep, company roles) see the list; members do not see each other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list is its club_admin's only, every read is audited, and platform staff get 404. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
+      description: "The org's admins (club_admin, university_rep, company roles) see the list; members do not see each other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list is its club_admin's only, every read is audited, and platform staff get 404. Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company. When the read concerns one user, the X-Koro-Access-Reason justification is shown to that user (support access notification; reason of the break_glass item of listMySecurityEvents): write no other person's data in it."
       operationId: listOrgMembers
       parameters:
         - description: Organization ID
@@ -39154,7 +39156,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members/{membership_id}/remove:
     post:
-      description: The last club_admin and the company_owner cannot be removed (409 orgs.last_admin).
+      description: "The last club_admin and the company_owner cannot be removed (409 orgs.last_admin). Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: removeOrgMember
       parameters:
         - description: Organization ID
@@ -39202,7 +39204,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/members/{membership_id}/role:
     post:
-      description: "The old membership ends (role_changed) and a new one starts: the answer carries the new membership_id. club_admin goes to verified adult students only (422 orgs.club_admin_requires_adult_student); company_owner moves by ownership transfer only; the last club_admin cannot be demoted (409 orgs.last_admin)."
+      description: "The old membership ends (role_changed) and a new one starts: the answer carries the new membership_id. club_admin goes to verified adult students only (422 orgs.club_admin_requires_adult_student); company_owner moves by ownership transfer only; the last club_admin cannot be demoted (409 orgs.last_admin). Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: changeOrgMemberRole
       parameters:
         - description: Organization ID
@@ -39806,7 +39808,7 @@ paths:
       x-koro-terms-gate: enforced
   /api/v1/orgs/{org_id}/ownership-transfer:
     post:
-      description: The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). The former owner stays as company_admin; both users' sessions are closed.
+      description: "The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). The former owner stays as company_admin; both users' sessions are closed. Platform staff who are members of the org (any role; the platform org aside) act here with the membership only: no platform role's right and no exemption from the suspension (403 forbidden, orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the ownership nor closes the company."
       operationId: transferOrgOwnership
       parameters:
         - description: Organization ID

@@ -40,8 +40,10 @@ func wantPartyDenied(t *testing.T, e *env, act authz.Action, id uuid.UUID, key, 
 // member of a pending_review company (any role) neither verifies its
 // registration (adminVerifyOrg) nor rejects it (closeOrg as staff): 403
 // before the proof, recorded as denied (orgs.org.verify, org_member, the
-// decision named), and the company still awaits review. A platform admin of
-// another company, or of none, decides; a platform admin who owns the
+// decision named), and the company still awaits review. Since BE-214 the
+// org surface refuses the close first (orgs.org.close: a member closes only
+// as the owner), recorded as that action's party refusal. A platform admin
+// of another company, or of none, decides; a platform admin who owns the
 // pending company withdraws it (the owner's close is no rejection).
 func TestOrgReview_PartyCannotDecide(t *testing.T) {
 	t.Parallel()
@@ -65,12 +67,12 @@ func TestOrgReview_PartyCannotDecide(t *testing.T) {
 		}
 	}
 	wantPartyDenied(t, e, authz.OrgsOrgVerify, id, "transition", "verify", 3)
-	wantPartyDenied(t, e, authz.OrgsOrgVerify, id, "review_outcome", domainevent.OrgReviewRejected, 2)
+	wantSurfaceDenied(t, e, authz.OrgsOrgClose, authz.TypeOrg, id, id, nil, 2) // BE-214
 	cur, err := e.store.GetOrg(ctx, id)
 	if err != nil || cur.Status != orgs.StatusPendingReview || cur.VerifiedAt != nil || cur.RejectionReason != nil {
 		t.Fatalf("the party decided: %+v, %v", cur, err)
 	}
-	if n := len(e.audit.OfOutcome(authz.OrgsOrgVerify, audit.Success)) + len(e.audit.Of(authz.OrgsOrgClose)); n != 0 {
+	if n := len(e.audit.OfOutcome(authz.OrgsOrgVerify, audit.Success)) + len(e.audit.OfOutcome(authz.OrgsOrgClose, audit.Success)); n != 0 {
 		t.Fatalf("%d decision records after the party's attempts", n)
 	}
 	if evs := eventsOf[domainevent.OrgReviewDecided](t, e, domainevent.TopicOrgReviewDecided); len(evs) != 0 {

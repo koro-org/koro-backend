@@ -103,7 +103,7 @@ func (h handler) replaceDocumentFile(ctx context.Context, in *replaceDocumentFil
 	if err != nil {
 		return nil, err
 	}
-	return &documentOutput{Body: documentDTO(v.Document, v.FileState, fullTaxIDs(a))}, nil
+	return &documentOutput{Body: documentDTO(v.Document, v.FileState, fullTaxIDs(a, httpx.ParseID(in.OrgID)))}, nil
 }
 
 type adminReplaceDocumentFileInput struct {

@@ -135,10 +135,10 @@ func partiesPolicy() Policy {
 					return nil
 				}
 				return staff
-			case TypePayee:
-				return orgPayeeGrants(a, act, r, staff)
+			case TypePayee: // the org surface (BE-214: a member as a member)
+				return asMember(a, r, orgPayeeGrants(a, act, r, staff))
 			case TypeLegalParty:
-				return orgPartyGrants(a, act, r, staff)
+				return asMember(a, r, orgPartyGrants(a, act, r, staff))
 			}
 			return nil
 		},

@@ -55,13 +55,14 @@ func (p OrgPatch) empty() bool {
 }
 
 // writable is the org status rule of writes on behalf of an org (03 §2.3):
-// a closed org takes no change, a suspended one only a platform admin's.
+// a closed org takes no change, a suspended one only a platform admin's who
+// is no member of it (BE-214, Q-69: a member writes as a member).
 func writable(a authz.Actor, o Org) error {
 	switch o.Status {
 	case StatusClosed:
 		return ErrInvalidState
 	case StatusSuspended:
-		if !a.HasPlatformRole(authz.PlatformAdmin) {
+		if !authz.ActsAsStaff(a, o.ID, authz.PlatformAdmin) {
 			return ErrOrgSuspended
 		}
 	}
@@ -80,8 +81,11 @@ func writable(a authz.Actor, o Org) error {
 // platform admins (BE-206, Q-55): the first one while none is pending flags
 // the company (companies.tax_id_review_requested_at) and writes
 // org.review_requested in the transaction; a platform admin's correction
-// flags nothing (they are the reviewers).
-func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (OrgView, error) {
+// flags nothing (they are the reviewers), unless they are a member of the
+// company (BE-214: a member's change waits like any member's). A refusal of
+// the party rule is recorded (recordRefusal).
+func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, ifMatch string, p OrgPatch) (_ OrgView, err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	proved, err := s.taxChangeProof(ctx, a, id, ifMatch, p)
 	if err != nil {
 		return OrgView{}, err
@@ -109,7 +113,7 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		if newTax && proved == "" { // the company was reviewed after the first read
 			return identity.ErrReauthRequired
 		}
-		review := newTax && o.Status == StatusActive && !a.HasPlatformRole(authz.PlatformAdmin)
+		review := newTax && o.Status == StatusActive && !authz.ActsAsStaff(a, o.ID, authz.PlatformAdmin)
 		if out, err = s.orgs().UpdateOrg(ctx, next); err != nil {
 			return err
 		}
@@ -146,14 +150,14 @@ func (s *service) UpdateOrg(ctx context.Context, a authz.Actor, id uuid.UUID, if
 		return OrgView{}, err
 	}
 	v, err := s.view(ctx, out)
-	v.FullTaxNo = fullTaxNo(a)
+	v.FullTaxNo = fullTaxNo(a, out.ID)
 	return v, err
 }
 
 // checkUpdate is what updateOrg asks of the caller on the org: authz (404/403),
 // the status rule (403 orgs.org_suspended, 409), If-Match (428/412).
 func checkUpdate(ctx context.Context, a authz.Actor, o Org, ifMatch string) error {
-	if err := authz.Can(ctx, a, authz.OrgsOrgUpdate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
+	if err := can(ctx, a, authz.OrgsOrgUpdate, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)), nil); err != nil {
 		return err
 	}
 	if err := writable(a, o); err != nil {
@@ -447,13 +451,17 @@ func (s *service) openCommerce() []OpenCommerceCheck {
 // the review adminVerifyOrg approves, so its party rule is the approval's
 // (orgs.org.verify on the org, BE-212): a platform admin who is a member of
 // the org is refused before the proof; its owner withdrawing it is no
-// rejection.
-func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof reauthProof) (OrgView, error) {
+// rejection. Since BE-214 the org surface's rule refuses such a member
+// first (orgs.org.close: only the owner closes as a member, and the
+// owner's close is no rejection), so the approval's check stays as a
+// second line.
+func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, reason string, proof reauthProof) (_ OrgView, err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsOrgClose, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
+	if err := can(ctx, a, authz.OrgsOrgClose, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)), nil); err != nil {
 		return OrgView{}, err
 	}
 	reason, err = cleanReason("body.reason", reason)
@@ -556,13 +564,17 @@ func (s *service) CloseOrg(ctx context.Context, a authz.Actor, id uuid.UUID, rea
 // transaction: the current owner's row and the target's company_admin row
 // end (role_changed), the target gets a company_owner row and the former
 // owner a company_admin row (02 §7.3: a role change keeps the history).
-// Both users' sessions are closed after the commit (03 §2.2-6).
-func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newOwner uuid.UUID, proof reauthProof) (OrgView, error) {
+// Both users' sessions are closed after the commit (03 §2.2-6). A platform
+// admin who is a member but not the owner is refused (BE-214), recorded with
+// the target named (a self-transfer shows).
+func (s *service) TransferOwnership(ctx context.Context, a authz.Actor, id, newOwner uuid.UUID, proof reauthProof) (_ OrgView, err error) {
+	defer func() { err = s.recordRefusal(ctx, err) }()
 	o, err := s.orgs().GetOrg(ctx, id)
 	if err != nil {
 		return OrgView{}, err
 	}
-	if err := authz.Can(ctx, a, authz.OrgsOwnershipTransfer, authz.OrgResource(o.ID, string(o.Kind), string(o.Status))); err != nil {
+	if err := can(ctx, a, authz.OrgsOwnershipTransfer, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)),
+		map[string]any{"new_owner_user_id": newOwner.String()}); err != nil {
 		return OrgView{}, err
 	}
 	if newOwner == uuid.Nil() {

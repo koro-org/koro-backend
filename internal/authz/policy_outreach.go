@@ -48,7 +48,8 @@ func outreachPolicy() Policy {
 				}
 				return gs
 			case OutreachAudienceCount, OutreachDispatchList, OutreachDispatchRead, OutreachDispatchCancel:
-				return append(targetingGrants(a, r.OrgID), Grant{Role: RolePlatformAdmin})
+				// BE-214: in an org of their own, platform admins target as members.
+				return asMember(a, r, append(targetingGrants(a, r.OrgID), Grant{Role: RolePlatformAdmin}))
 			}
 			return nil
 		},

@@ -21,7 +21,7 @@ func registerMembers(api huma.API, h handler) {
 		Summary: "List an organization's members",
 		Description: "The org's admins (club_admin, university_rep, company roles) see the list; members do not see each " +
 			"other. support and platform_admin need X-Koro-Access-Reason (break-glass, audited). A sensitive club's list " +
-			"is its club_admin's only, every read is audited, and platform staff get 404.",
+			"is its club_admin's only, every read is audited, and platform staff get 404. " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsMemberList), Surface: op.SurfaceOrg, BreakGlass: true}, h.listMembers)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -46,7 +46,7 @@ func registerMembers(api huma.API, h handler) {
 		OperationID: "removeOrgMember", Method: http.MethodPost, Path: "/orgs/{org_id}/members/{membership_id}/remove",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Remove a member",
-		Description:   "The last club_admin and the company_owner cannot be removed (409 orgs.last_admin).",
+		Description:   "The last club_admin and the company_owner cannot be removed (409 orgs.last_admin). " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsMemberRemove), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.remove)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -55,7 +55,7 @@ func registerMembers(api huma.API, h handler) {
 		Description: "The old membership ends (role_changed) and a new one starts: the answer carries the new " +
 			"membership_id. club_admin goes to verified adult students only (422 " +
 			"orgs.club_admin_requires_adult_student); company_owner moves by ownership transfer only; the last " +
-			"club_admin cannot be demoted (409 orgs.last_admin).",
+			"club_admin cannot be demoted (409 orgs.last_admin). " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsMemberChangeRole), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.changeRole)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -76,18 +76,20 @@ func registerMembers(api huma.API, h handler) {
 		DefaultStatus: http.StatusCreated,
 		Summary:       "Invite someone to an organization by e-mail",
 		Description: "The invitation is valid for 7 days and can be accepted once, by the account with the invited " +
-			"address only. company_owner is never invited; university roles are invited by platform_admin.",
+			"address only. company_owner is never invited; university roles are invited by platform_admin. " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsInvitationCreate), Surface: op.SurfaceOrg, Idempotency: op.IdempotencyOptional}, h.invite)
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "listOrgInvitations", Method: http.MethodGet, Path: "/orgs/{org_id}/invitations",
-		Summary: "List an organization's open invitations",
+		Summary:     "List an organization's open invitations",
+		Description: asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsInvitationList), Surface: op.SurfaceOrg}, h.listInvitations)
 
 	op.Register(api, "orgs", huma.Operation{
 		OperationID: "revokeOrgInvitation", Method: http.MethodDelete, Path: "/orgs/{org_id}/invitations/{invitation_id}",
 		DefaultStatus: http.StatusNoContent,
 		Summary:       "Revoke an open invitation",
+		Description:   asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsInvitationRevoke), Surface: op.SurfaceOrg}, h.revokeInvitation)
 
 	op.Register(api, "orgs", huma.Operation{

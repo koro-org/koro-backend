@@ -119,14 +119,15 @@ func (s *service) org(ctx context.Context, id uuid.UUID) (orgs.OrgSummary, error
 }
 
 // writable is the org status rule of writes on behalf of the organiser
-// (03 §2.3): a suspended org only through a platform admin, a closed (or
-// unverified) org not at all. The codes are orgs' (06 H-52).
+// (03 §2.3): a suspended org only through a platform admin who is no member
+// of it (BE-214, Q-69), a closed (or unverified) org not at all. The codes
+// are orgs' (06 H-52).
 func writable(a authz.Actor, o orgs.OrgSummary) error {
 	switch o.Status {
 	case orgs.StatusActive:
 		return nil
 	case orgs.StatusSuspended:
-		if a.HasPlatformRole(authz.PlatformAdmin) {
+		if authz.ActsAsStaff(a, o.ID, authz.PlatformAdmin) {
 			return nil
 		}
 		return orgs.ErrOrgSuspended

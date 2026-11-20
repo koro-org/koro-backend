@@ -1,6 +1,8 @@
 package authz_test
 
 import (
+	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"testing"
@@ -137,6 +139,74 @@ func TestOrgsPolicy_PartyDecidesNothing(t *testing.T) {
 	moderated.Attrs["moderation_action"], moderated.Attrs["trust_level"] = "warn_org", "new"
 	wantErr(t, authz.Can(ctx, mod, authz.FeedOrgModerate, moderated), nil, false)
 	wantErr(t, authz.Can(ctx, join(mod, co, authz.MemberRecruiter), authz.FeedOrgModerate, moderated), authz.ErrForbidden, false)
+}
+
+// TestOrgsPolicy_PartyActsAsMember (BE-214, Q-69; T-438): on the
+// management surface of a company they belong to, a platform admin acts
+// with the membership only. Its recruiter changes nothing (reads the member
+// list as a recruiter); its company_admin edits the profile, members and
+// invitations as company_admin but neither transfers the ownership (to
+// themselves or anyone) nor closes the company (k-own); its owner does both
+// as the owner. A platform admin of another company, or of none, keeps every
+// cell; so does the platform org's staff on the platform org. A support
+// member reads the list as a member, never by break-glass.
+func TestOrgsPolicy_PartyActsAsMember(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	co, other, platform := authztest.ID("company_a"), authztest.ID("company_b"), authztest.ID("platform_org")
+	join := func(a authz.Actor, org uuid.UUID, kind authz.OrgKind, role authz.MemberRole) authz.Actor {
+		a.Memberships = append(slices.Clone(a.Memberships), authz.Membership{OrgID: org, OrgKind: kind, Role: role})
+		return a
+	}
+	surface := func(org uuid.UUID, kind authz.OrgKind) map[authz.Action]authz.Resource {
+		o := authz.OrgResource(org, string(kind), "active")
+		list := authz.OrgResource(org, string(kind), "active")
+		list.Attrs[authz.AttrSensitive], list.Attrs[authz.AttrAccessReason] = "false", "Destek talebinin incelenmesi"
+		member := authz.Resource{Type: authz.TypeOrgMember, ID: uuid.NewV7(), OrgID: &org, OwnerUserID: ptr(uuid.NewV7()),
+			Attrs: map[string]string{"org_kind": string(kind), "role": "recruiter", authz.AttrStatus: "active",
+				authz.AttrSensitive: "false", authz.AttrAccessReason: "Destek talebinin incelenmesi"}}
+		inv := authz.Resource{Type: authz.TypeOrgInvitation, OrgID: &org, Attrs: map[string]string{
+			"org_kind": string(kind), "role": "recruiter"}}
+		return map[authz.Action]authz.Resource{
+			authz.OrgsOrgUpdate: o, authz.OrgsOrgClose: o, authz.OrgsOwnershipTransfer: o, authz.OrgsMemberList: list,
+			authz.OrgsMemberRead: member, authz.OrgsMemberRemove: member, authz.OrgsMemberChangeRole: member,
+			authz.OrgsInvitationCreate: inv, authz.OrgsInvitationList: list, authz.OrgsInvitationRevoke: inv,
+		}
+	}
+	pad, sup := persona(t, "platform_admin"), persona(t, "support")
+	every := slices.Collect(maps.Keys(surface(co, authz.OrgCompany)))
+	for _, tc := range []struct {
+		name    string
+		a       authz.Actor
+		org     uuid.UUID
+		kind    authz.OrgKind
+		allowed []authz.Action
+	}{
+		{"recruiter", join(pad, co, authz.OrgCompany, authz.MemberRecruiter), co, authz.OrgCompany,
+			[]authz.Action{authz.OrgsMemberList, authz.OrgsMemberRead}},
+		{"company_admin", join(pad, co, authz.OrgCompany, authz.MemberCompanyAdmin), co, authz.OrgCompany,
+			[]authz.Action{authz.OrgsOrgUpdate, authz.OrgsMemberList, authz.OrgsMemberRead, authz.OrgsMemberRemove,
+				authz.OrgsMemberChangeRole, authz.OrgsInvitationCreate, authz.OrgsInvitationList, authz.OrgsInvitationRevoke}},
+		{"owner", join(pad, co, authz.OrgCompany, authz.MemberCompanyOwner), co, authz.OrgCompany, every},
+		{"member elsewhere", join(pad, other, authz.OrgCompany, authz.MemberCompanyAdmin), co, authz.OrgCompany, every},
+		{"no membership", pad, co, authz.OrgCompany, every},
+		{"the platform org's staff", join(pad, platform, authz.OrgPlatform, authz.MemberStaff), platform, authz.OrgPlatform, every},
+		{"support, recruiter", join(sup, co, authz.OrgCompany, authz.MemberRecruiter), co, authz.OrgCompany,
+			[]authz.Action{authz.OrgsMemberList, authz.OrgsMemberRead}},
+		{"support, club member", join(sup, authztest.ID("club_a"), authz.OrgClub, authz.MemberMember),
+			authztest.ID("club_a"), authz.OrgClub, nil},
+		{"support, outsider", sup, co, authz.OrgCompany, []authz.Action{authz.OrgsMemberList, authz.OrgsMemberRead}},
+	} {
+		for act, r := range surface(tc.org, tc.kind) {
+			var want error = authz.ErrForbidden
+			if slices.Contains(tc.allowed, act) {
+				want = nil
+			}
+			if err := authz.Can(ctx, tc.a, act, r); (err == nil) != (want == nil) || err != nil && !errors.Is(err, want) {
+				t.Errorf("%s: %s = %v, want %v", tc.name, act, err, want)
+			}
+		}
+	}
 }
 
 func TestOrgsPolicy_EdgeCases(t *testing.T) {

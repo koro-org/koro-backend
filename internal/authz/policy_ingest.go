@@ -13,7 +13,8 @@ const TypeIngestCatalog = "ingest_catalog"
 //	ingest.imported_event.request_removal  P: anyone may ask that an imported event be removed
 //	                                       (the subject of the page may have no account); it is
 //	                                       hidden at once and waits for a platform admin
-//	ingest.suggestion.list                 S: club_admin of the club; platform_admin
+//	ingest.suggestion.list                 S: club_admin of the club; platform_admin who is no
+//	                                       member of the club (BE-214, asMember)
 //	ingest.suggestion.promote              S: club_admin of the club only (the draft is the
 //	                                       club's own, events.event.create decides again)
 //	ingest.suggestion.reject               S: club_admin of the club only
@@ -56,7 +57,7 @@ func ingestPolicy() Policy {
 				if clubAdmin {
 					gs = append(gs, Grant{Role: RoleClubAdmin})
 				}
-				return gs
+				return asMember(a, r, gs) // BE-214: a member of the club lists as a member
 			case IngestSuggestionPromote, IngestSuggestionReject, IngestQuickImportRun:
 				if clubAdmin {
 					return []Grant{{Role: RoleClubAdmin}}

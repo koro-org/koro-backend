@@ -82,7 +82,7 @@ func statsPolicy() Policy {
 			default:
 				return nil
 			}
-			return gs
+			return asMember(a, r, gs) // BE-214: a member reads its org's panel as a member
 		},
 	}
 }

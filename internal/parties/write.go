@@ -74,7 +74,7 @@ func (s *service) CreateBuyerParty(ctx context.Context, a authz.Actor, orgID uui
 	if err != nil {
 		return PartyView{}, err
 	}
-	return s.reload(ctx, id, fullTaxIDs(a))
+	return s.reload(ctx, id, fullTaxIDs(a, orgID))
 }
 
 // AdminCreateParty implements Service: a payee or platform party
@@ -185,7 +185,7 @@ func (s *service) UpdateOrgParty(ctx context.Context, a authz.Actor, orgID, part
 	if err != nil {
 		return PartyView{}, err
 	}
-	return s.reload(ctx, partyID, fullTaxIDs(a))
+	return s.reload(ctx, partyID, fullTaxIDs(a, orgID))
 }
 
 // AdminUpdateParty implements Service: authz (403 before reading) → in one

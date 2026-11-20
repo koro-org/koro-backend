@@ -67,7 +67,7 @@ func ledgerPolicy() Policy {
 				}
 			case TypePayee:
 				if act == LedgerBalanceRead {
-					return orgSellerGrants(a, r, staff)
+					return asMember(a, r, orgSellerGrants(a, r, staff))
 				}
 			case TypePayout:
 				switch act {
@@ -75,7 +75,7 @@ func ledgerPolicy() Policy {
 					// The eyes: the core table refuses the payout's creator.
 					return fin
 				case LedgerPayoutList, LedgerPayoutRead:
-					return orgSellerGrants(a, r, staff)
+					return asMember(a, r, orgSellerGrants(a, r, staff))
 				}
 			}
 			return nil

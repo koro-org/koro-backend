@@ -175,10 +175,10 @@ func eventsPolicy() Policy {
 			case EventsLintRuleManage:
 				return []Grant{{Role: RoleDPO}, {Role: RolePlatformAdmin}}
 			case EventsEventListOrg:
-				return append(eventOrgGrants(a, r.OrgID),
-					Grant{Role: RoleModerator}, Grant{Role: RoleSupport}, Grant{Role: RolePlatformAdmin})
+				return asMember(a, r, append(eventOrgGrants(a, r.OrgID),
+					Grant{Role: RoleModerator}, Grant{Role: RoleSupport}, Grant{Role: RolePlatformAdmin}))
 			case EventsEventUpdate, EventsEventCancel:
-				return append(eventOrgGrants(a, r.OrgID), Grant{Role: RolePlatformAdmin})
+				return asMember(a, r, append(eventOrgGrants(a, r.OrgID), Grant{Role: RolePlatformAdmin}))
 			case EventsEventCreate, EventsEventPublish, EventsEventDelete, EventsStaffList, EventsStaffManage,
 				EventsFormManage, EventsFormPublish:
 				gs := eventOrgGrants(a, r.OrgID)
@@ -196,7 +196,7 @@ func eventsPolicy() Policy {
 				if platformOrg(a, r.OrgID) { // k-po
 					gs = append(gs, Grant{Role: RolePlatformAdmin})
 				}
-				return gs
+				return asMember(a, r, gs)
 			case EventsRegistrationDecide, EventsRegistrationCancel:
 				gs := eventOrgGrants(a, r.OrgID)
 				if platformOrg(a, r.OrgID) { // k-po
@@ -217,7 +217,7 @@ func eventsPolicy() Policy {
 			case EventsExportCreate:
 				return managerGrants(a, r)
 			case EventsExportList:
-				return append(managerGrants(a, r), Grant{Role: RoleDPO})
+				return asMember(a, r, append(managerGrants(a, r), Grant{Role: RoleDPO}))
 			case EventsExportDownload:
 				if r.Type == TypeEventExport && !a.Owns(r) {
 					return nil // ·O: the requester only

@@ -18,7 +18,9 @@ const countBudgetRule = "outreach_count_daily"
 
 // ScopeOf returns a's targeting scope in orgID (03 k16): the role a holds
 // in the org decides; a platform_admin without such a role acts with the
-// platform's scope (k-po targeting, the ✓ cell of outreach.audience.count).
+// platform's scope (k-po targeting, the ✓ cell of outreach.audience.count),
+// unless they are a member of the org (BE-214, Q-69: a member targets as a
+// member, the platform org aside).
 func ScopeOf(a authz.Actor, orgID uuid.UUID) Scope {
 	if !a.IsUser() || orgID == uuid.Nil() {
 		return ScopeNone
@@ -37,7 +39,7 @@ func ScopeOf(a authz.Actor, orgID uuid.UUID) Scope {
 			return ScopeCompany
 		}
 	}
-	if a.HasPlatformRole(authz.PlatformAdmin) {
+	if authz.ActsAsStaff(a, orgID, authz.PlatformAdmin) {
 		return ScopePlatform
 	}
 	return ScopeNone

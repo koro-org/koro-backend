@@ -186,7 +186,7 @@ func (s *service) decideTaxID(ctx context.Context, a authz.Actor, id uuid.UUID, 
 		return OrgView{}, err
 	}
 	v, err := s.reload(ctx, id)
-	v.FullTaxNo = fullTaxNo(a) // the reviewer sees the number decided on
+	v.FullTaxNo = fullTaxNo(a, id) // the reviewer (no party, BE-208) sees the number decided on
 	return v, err
 }
 

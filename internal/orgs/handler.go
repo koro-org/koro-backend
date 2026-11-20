@@ -67,7 +67,7 @@ func Register(api huma.API, svc Service) {
 			"identity.reauth_required, identity.reauth_failed). When a member does it, the active company stays active " +
 			"and the change waits for a platform admin (company.tax_id_review_requested_at; adminApproveTaxIdChange, " +
 			"adminRejectTaxIdChange). Another identifier clears a rejection's company.tax_id_rejection_reason. The other " +
-			"changes need no proof.",
+			"changes need no proof. " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsOrgUpdate), Surface: op.SurfaceOrg, Reauth: true}, h.updateOrg)
 
 	op.Register(api, "orgs", huma.Operation{
@@ -76,7 +76,7 @@ func Register(api huma.API, svc Service) {
 		Description: "Company owner or platform admin, with re-authentication. Open orders or payouts → 409 " +
 			"orgs.open_commerce. Every membership ends (org_closed). Platform staff closing a pending_review org reject " +
 			"its registration (its owner withdraws it): the reason is kept for the founder's notice. " +
-			party("org", "the proof", "a rejection"),
+			party("org", "the proof", "a rejection") + " " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsOrgClose), Surface: op.SurfaceOrg, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.closeOrg)
 
@@ -84,7 +84,7 @@ func Register(api huma.API, svc Service) {
 		OperationID: "transferOrgOwnership", Method: http.MethodPost, Path: "/orgs/{org_id}/ownership-transfer",
 		Summary: "Transfer company ownership",
 		Description: "The new owner must be an active company_admin of the company (422 orgs.transfer_target_invalid). " +
-			"The former owner stays as company_admin; both users' sessions are closed.",
+			"The former owner stays as company_admin; both users' sessions are closed. " + asMemberNote,
 	}, op.Meta{Action: string(authz.OrgsOwnershipTransfer), Surface: op.SurfaceOrg, Reauth: true, RateLimit: op.RateReauth,
 		Idempotency: op.IdempotencyOptional}, h.transfer)
 
@@ -153,6 +153,13 @@ func party(subject, before, decision string) string {
 	return "A platform admin who is a member of the " + subject + " (any role) is a party" + on + ": 403 forbidden, " +
 		"checked before " + before + " (another platform admin decides)."
 }
+
+// asMemberNote is the org surface's party rule (BE-214, Q-69) in an
+// operation's description.
+const asMemberNote = "Platform staff who are members of the org (any role; the platform org aside) act here with the " +
+	"membership only: no platform role's right and no exemption from the suspension (403 forbidden, " +
+	"orgs.org_suspended), checked before any proof; a company_admin who is a platform admin neither transfers the " +
+	"ownership nor closes the company."
 
 // taxIDParty is the party rule of the tax identifier decisions (BE-208).
 var taxIDParty = party("company", "the review, If-Match and the proof", "")

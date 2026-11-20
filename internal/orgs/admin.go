@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 	"uuid"
 
-	"koro/internal/audit"
 	"koro/internal/authz"
 	"koro/internal/platform/domainevent"
 	"koro/internal/platform/idempotency"
@@ -39,22 +38,15 @@ const reasonOrgMember = "org_member"
 // resource of act). A platform admin who is a member of o (any role) is
 // refused 403, recorded as denied in its own transaction (the refusal must
 // stay on record) with o's scope: o was read (06 H-38). meta names the
-// decision refused, never business data.
+// decision refused, never business data. The record is the org surface's
+// (partyDenied, BE-214).
 func (s *service) canDecide(ctx context.Context, a authz.Actor, act authz.Action, o Org, meta map[string]any) error {
-	err := authz.Can(ctx, a, act, authz.OrgResource(o.ID, string(o.Kind), string(o.Status)))
+	r := authz.OrgResource(o.ID, string(o.Kind), string(o.Status))
+	err := authz.Can(ctx, a, act, r)
 	if err == nil || !errors.Is(err, authz.ErrForbidden) {
 		return err
 	}
-	id := o.ID
-	if lerr := s.d.Tx.WithTx(ctx, func(ctx context.Context) error {
-		return s.d.Audit.Log(ctx, audit.Event{
-			Action: string(act), Outcome: audit.Denied, OrgID: &id, ResourceType: resourceOrg, ResourceID: &id,
-			Reason: reasonOrgMember, Metadata: meta,
-		}.By(a))
-	}); lerr != nil {
-		return lerr
-	}
-	return err
+	return s.recordRefusal(ctx, &partyRefusal{err: err, denied: partyDenied(a, act, r, meta)})
 }
 
 // AdminVerifyOrg implements Service: authz (403 before reading) → note →

@@ -61,17 +61,18 @@ func serviceResource(id uuid.UUID, accounting bool) authz.Resource {
 }
 
 // staff reports whether a acts as platform staff of the catalogue
-// (platform or finance admin): every service, the management fields of
-// every offering.
-func staff(a authz.Actor) bool {
-	return a.HasPlatformRole(authz.PlatformAdmin) || a.HasPlatformRole(authz.PlatformFinanceAdmin)
+// (platform or finance admin) on the seller org (uuid.Nil: no org): every
+// service, the management fields of every offering, the suspended seller's
+// writes. A member of the seller acts as a member (BE-214, Q-69).
+func staff(a authz.Actor, org uuid.UUID) bool {
+	return authz.ActsAsStaff(a, org, authz.PlatformAdmin, authz.PlatformFinanceAdmin)
 }
 
 // manager reports whether a manages the seller org's offerings (its
 // club_admin, university_rep or career_staff) or is platform staff: the
 // caller sees the management fields (payee, stock, approval).
 func manager(a authz.Actor, o Offering) bool {
-	return staff(a) || a.HasOrgRole(o.OrgID, authz.MemberClubAdmin, authz.MemberUniversityRep, authz.MemberCareerStaff)
+	return staff(a, o.OrgID) || a.HasOrgRole(o.OrgID, authz.MemberClubAdmin, authz.MemberUniversityRep, authz.MemberCareerStaff)
 }
 
 // facts resolves the seller club's university (none for a university, the
@@ -113,13 +114,13 @@ func (s *service) org(ctx context.Context, orgID uuid.UUID) (orgs.OrgSummary, er
 
 // writableOrg is the org status rule of writes on behalf of a seller (03
 // §2.3): a closed org takes no change, a suspended one only platform
-// staff's.
+// staff's who are no member of it (staff, BE-214).
 func writableOrg(a authz.Actor, o orgs.OrgSummary) error {
 	switch o.Status {
 	case orgs.StatusClosed:
 		return orgs.ErrInvalidState
 	case orgs.StatusSuspended:
-		if !staff(a) {
+		if !staff(a, o.ID) {
 			return orgs.ErrOrgSuspended
 		}
 	}

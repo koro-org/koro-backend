@@ -62,7 +62,9 @@ func billingPolicy() Policy {
 				}
 			case TypeInvoice:
 				switch act {
-				case BillingInvoiceList, BillingInvoiceRead:
+				case BillingInvoiceList: // the org's collection (org surface; BE-214: a member as a member)
+					return asMember(a, r, append(invoiceOrgGrants(a, r), pad, fin))
+				case BillingInvoiceRead:
 					return append(invoiceOrgGrants(a, r), pad, fin)
 				case BillingInvoiceUpload:
 					gs := []Grant{fin}

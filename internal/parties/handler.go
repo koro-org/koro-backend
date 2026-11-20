@@ -399,7 +399,7 @@ func (h handler) upload(ctx context.Context, in *uploadDocumentInput) (*document
 	if err != nil {
 		return nil, err
 	}
-	return h.documentOut(ctx, d, fullTaxIDs(a))
+	return h.documentOut(ctx, d, fullTaxIDs(a, httpx.ParseID(in.OrgID)))
 }
 
 type downloadInput struct {

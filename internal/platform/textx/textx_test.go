@@ -186,3 +186,19 @@ func FuzzTextx_Slug(f *testing.F) {
 		}
 	})
 }
+
+func TestTextx_StorableText(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{
+		"":                   true,
+		"ayse@koro.test":     true,
+		"çağla@koro.test":    true,
+		"a\x00b@koro.test":   false,
+		"\x00":               false,
+		"\xff\xfe@koro.test": false,
+	} {
+		if got := textx.StorableText(in); got != want {
+			t.Errorf("StorableText(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

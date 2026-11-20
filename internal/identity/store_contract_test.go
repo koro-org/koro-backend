@@ -74,6 +74,11 @@ func storeContract(t *testing.T, newWorld func(t *testing.T) storeWorld) {
 		if _, found, _ := s.UserByEmail(ctx, u.EmailNormalized); !found {
 			t.Fatal("UserByEmail missed")
 		}
+		// Unvalidated sign-in input: a NUL byte is "no such user", not a
+		// PostgreSQL encoding error (SQLSTATE 22021; BE-213).
+		if _, found, err := s.UserByEmail(ctx, "\x00\x1fc@koro.test"); found || err != nil {
+			t.Fatalf("UserByEmail(NUL) = %v, %v; want not found, nil", found, err)
+		}
 		if _, err := s.User(ctx, uuid.NewV7()); !errors.Is(err, identity.ErrNotFound) {
 			t.Fatalf("unknown user = %v", err)
 		}

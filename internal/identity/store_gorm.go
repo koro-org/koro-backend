@@ -80,7 +80,10 @@ func (s gormStore) user(ctx context.Context, id uuid.UUID, lock bool) (User, err
 //
 // cross-org: accounts belong to no org.
 func (s gormStore) UserByEmail(ctx context.Context, normalized string) (User, bool, error) {
-	if normalized == "" {
+	// A NUL byte or invalid UTF-8 can never be a stored address (registration
+	// validates it) and PostgreSQL rejects it with SQLSTATE 22021; answer "no
+	// such user" instead of a 500 (sign-in fuzzing, BE-213).
+	if normalized == "" || !textx.StorableText(normalized) {
 		return User{}, false, nil
 	}
 	var rows []userRow

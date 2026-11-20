@@ -44,6 +44,13 @@ func NormalizeEmail(s string) string {
 	return strings.ToLower(norm.NFC.String(strings.TrimSpace(s)))
 }
 
+// StorableText reports whether s can be sent to PostgreSQL as text: valid
+// UTF-8 without a NUL byte (anything else fails with SQLSTATE 22021). Use it
+// to answer lookups on unvalidated input with "not found" rather than a 500.
+func StorableText(s string) bool {
+	return utf8.ValidString(s) && strings.IndexByte(s, 0) < 0
+}
+
 // NormalizeText normalizes a single-line human text (name, title, search
 // input) before it is stored or compared (05 §9.5): NFC, any run of Unicode
 // whitespace (tabs and newlines included) becomes one space, leading and
